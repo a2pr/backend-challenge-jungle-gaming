@@ -7,7 +7,7 @@ The project implementation should be 70% human creation, so limit updates and ne
 suggesting new approaches and noting missing parts from the requirements. Also include considerations not added to implementation
 
 ## Stack
-This is a javascript project using NextJS, typescript in strict mode, using postgresSQL as database, ans SQS by localstack for messages, also MikroORM for ORM. All wrapped docker-compose
+This is a javascript project using NestJS, typescript in strict mode, using postgresSQL as database, ans SQS by localstack for messages, also MikroORM for ORM. All wrapped docker-compose
 
 ## Objective
 Following scoring standard our objective is getting a +80% score, real score may vary between 60-80% but lets target that area
