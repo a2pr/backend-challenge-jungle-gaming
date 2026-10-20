@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import Money from '../../src/money/money.js';
+import Money from "../../../src/money/money.js";
 
 const brl = (amount: string) => Money.from({ amount, currency: 'BRL' });
 const usd = (amount: string) => Money.from({ amount, currency: 'USD' });
