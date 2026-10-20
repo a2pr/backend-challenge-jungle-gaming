@@ -18,15 +18,22 @@ export class HealthService {
 
   async getReady(): Promise<Record<string, boolean>> {
     const [postgres, sqs] = await Promise.all([
-      this.probe(async () => !!(await this.orm.em.getConnection().execute('select 1'))),
+      this.probe(
+        async () => !!(await this.orm.em.getConnection().execute('select 1')),
+      ),
       // reachability only; switch to GetQueueAttributes on wager-transactions.fifo once queues are provisioned
-      this.probe(async () => !!(await this.sqs.send(new ListQueuesCommand({ MaxResults: 1 })))),
+      this.probe(
+        async () =>
+          !!(await this.sqs.send(new ListQueuesCommand({ MaxResults: 1 }))),
+      ),
     ]);
     return { postgres, sqs };
   }
 
   private probe(check: () => Promise<boolean>): Promise<boolean> {
-    const timeout = new Promise<boolean>((resolve) => setTimeout(resolve, PROBE_TIMEOUT_MS, false));
+    const timeout = new Promise<boolean>((resolve) =>
+      setTimeout(resolve, PROBE_TIMEOUT_MS, false),
+    );
     return Promise.race([check().catch(() => false), timeout]);
   }
 }

@@ -13,7 +13,8 @@ export class HealthController {
   @Get('ready')
   async getReady(): Promise<string> {
     const checks = await this.service.getReady();
-    if (Object.values(checks).includes(false)) throw new ServiceUnavailableException(checks);
+    if (Object.values(checks).includes(false))
+      throw new ServiceUnavailableException(checks);
     return 'OK';
   }
 }
