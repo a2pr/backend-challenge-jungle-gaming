@@ -6,12 +6,12 @@ class InvalidMoneyError extends Error {
     }
 }
 
-class CurrencyMistMatchError extends Error {
+class CurrencyMismatchError extends Error {
     constructor(expected: string, received: string) {
         super(`Expected: ${expected}, received : ${received}`)
-        this.name = "CurrencyMistMatchError";
-        Object.setPrototypeOf(this, CurrencyMistMatchError.prototype);
+        this.name = "CurrencyMismatchError";
+        Object.setPrototypeOf(this, CurrencyMismatchError.prototype);
     }
 }
 
-export {InvalidMoneyError, CurrencyMistMatchError}
+export {InvalidMoneyError, CurrencyMismatchError}

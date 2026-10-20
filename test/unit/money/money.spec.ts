@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import Money from "../../../src/money/money.js";
-import {CurrencyMistMatchError, InvalidMoneyError} from "../../../src/money/errors.js";
+import {CurrencyMismatchError, InvalidMoneyError} from "../../../src/money/errors.js";
 
 const brl = (amount: string) => Money.from({ amount, currency: 'BRL' });
 const usd = (amount: string) => Money.from({ amount, currency: 'USD' });
@@ -40,8 +40,8 @@ describe('Money.from / zero', () => {
   it.each(['', 'br', 'BRLL', 'brl', 'B1L'])(
     'rejects invalid currency %j',
     (currency) => {
-      expect(() => Money.from({ amount: '1.00', currency })).toThrow();
-      expect(() => Money.zero(currency)).toThrow();
+      expect(() => Money.from({ amount: '1.00', currency })).toThrow(InvalidMoneyError);
+      expect(() => Money.zero(currency)).toThrow(InvalidMoneyError);
     },
   );
 
@@ -133,7 +133,7 @@ describe('currency mismatch', () => {
     ['isLessThan', (a: Money, b: Money) => a.isLessThan(b)],
     ['equals', (a: Money, b: Money) => a.equals(b)],
   ])('%s throws for BRL vs USD', (_name, op) => {
-    expect(() => op(brl('1.00'), usd('1.00'))).toThrow(CurrencyMistMatchError);
+    expect(() => op(brl('1.00'), usd('1.00'))).toThrow(CurrencyMismatchError);
   });
 });
 
@@ -148,5 +148,30 @@ describe('serialization', () => {
     expect(brl('100000000000000000000000.00').toString()).toBe(
       '100000000000000000000000.00',
     );
+  });
+});
+
+describe('typed errors', () => {
+  it('InvalidMoneyError carries its name and is an Error', () => {
+    try {
+      brl('abc');
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toBeInstanceOf(InvalidMoneyError);
+      expect(e).toBeInstanceOf(Error);
+      expect((e as Error).name).toBe('InvalidMoneyError');
+    }
+  });
+
+  it('CurrencyMismatchError names both currencies', () => {
+    try {
+      brl('1.00').add(usd('1.00'));
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toBeInstanceOf(CurrencyMismatchError);
+      expect((e as Error).name).toBe('CurrencyMismatchError');
+      expect((e as Error).message).toContain('BRL');
+      expect((e as Error).message).toContain('USD');
+    }
   });
 });
