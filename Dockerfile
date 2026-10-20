@@ -1,14 +1,16 @@
 FROM node:22
 
+# bun as package manager only; nest still runs on node
+COPY --from=oven/bun:1 /usr/local/bin/bun /usr/local/bin/bun
+
 WORKDIR /usr/src/app
 
-COPY package.json /usr/src/app/package.json
-COPY package-lock.json /usr/src/app/package-lock.json
+COPY package.json bun.lock ./
 
-RUN npm install
+RUN bun install --frozen-lockfile
 
-COPY . /usr/src/app
+COPY . .
 
-RUN npm run build
+RUN bun run build
 
-CMD ["npm", "run", "start:dev"]
+CMD ["bun", "run", "start:dev"]

@@ -3,6 +3,7 @@ services:
     build:
       context: .
     image: nest-app
+    user: node # uid 1000, keeps dist/ writable on the host
     ports:
       - "3000:3000"
     depends_on:
