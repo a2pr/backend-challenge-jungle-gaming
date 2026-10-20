@@ -1,0 +1,78 @@
+# Deployment
+
+Everything runs through Docker Compose. Only the local/dev setup exists today; the production notes at the end are considerations, not implemented.
+
+## Prerequisites
+
+- Docker with the Compose plugin
+- bun >= 1.4 (only for running scripts/tests on the host; the containers install their own)
+- Free host ports: 3000 (API), 5432 (Postgres), 4566 and 4510-4559 (LocalStack, bound to 127.0.0.1)
+
+## Environment
+
+Compose reads `.env` in the project root. It must define:
+
+| Variable | Example | Used by |
+|---|---|---|
+| `DATABASE_HOST` | `nest-postgres` | also sets the Postgres container name |
+| `DATABASE_USER` / `DATABASE_PASSWORD` / `DATABASE_NAME` | `root` / `…` / `nest` | Postgres init |
+| `DATABASE_PORT` | `5432` | URL below |
+| `DATABASE_URL` | `postgresql://USER:PASS@${DATABASE_HOST}:${DATABASE_PORT}/${DATABASE_NAME}` | MikroORM (`clientUrl`) |
+| `LOCALSTACK_DOCKER_NAME` | `localstack` | optional, defaults to `localstack-main` |
+
+SQS settings are fixed in `docker-compose.yaml` (`AWS_ENDPOINT_URL_SQS=http://localstack:4566`, region `us-east-1`, dummy credentials `test`/`test`). Do not commit `.env`.
+
+## Start
+
+```bash
+docker compose up -d --build
+```
+
+Services:
+
+| Service | Image | Notes |
+|---|---|---|
+| `nest-app` | built from `Dockerfile` (node:22 + bun) | runs `bun run start:dev`, source bind-mounted, reloads on save, runs as uid 1000 |
+| `db` | `postgres:13` | data in volume `postgres-data` |
+| `localstack` | `localstack/localstack:4.4` | `SERVICES=sqs`, data in volume `localstack-data` |
+
+## Verify
+
+```bash
+curl -i localhost:3000/health/live    # 200 OK
+curl -i localhost:3000/health/ready   # 200 {"postgres":true,"sqs":true}
+```
+
+`/health/ready` returns 503 with the failing dependency set to `false` if Postgres or SQS cannot be reached within 2 s.
+
+## Operations
+
+```bash
+docker compose logs -f nest-app
+docker compose stop db            # readiness -> 503, restart it and it recovers without restarting the app
+docker compose down               # keep data
+docker compose down -v            # also wipe Postgres and LocalStack volumes
+```
+
+**After changing dependencies**, recreate the anonymous `node_modules` volume or the container keeps the old one and fails with `Cannot find module`:
+
+```bash
+docker compose up -d --build -V nest-app
+```
+
+## Known problems
+
+- **LocalStack auth token.** `localstack/localstack:latest` and `-pro` exit with code 55 (`License activation failed`) without `LOCALSTACK_AUTH_TOKEN`. The compose file pins 4.4 to avoid this. To use a current image, create a free account, put the token in `.env`, and pass `LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN}` to the service.
+- **Root-owned files on the host.** If `dist/` or `tsconfig.build.tsbuildinfo` become root-owned (container run as root), `bun run build` fails with `EACCES`. Remove with `docker run --rm -v "$PWD":/app alpine rm -rf /app/dist /app/tsconfig.build.tsbuildinfo`.
+- **Boot race.** There are no Compose `healthcheck`s yet, so `nest-app` can start before Postgres accepts connections.
+- **No queues.** `wager-transactions.fifo` and `wager-transactions-dlq.fifo` are not created. The SQS probe only checks reachability.
+- **No migrations.** The database is empty; there is no schema to apply yet.
+
+## Production considerations (not implemented)
+
+- The current `Dockerfile` is dev-only (`start:dev`, bind mount, dev dependencies). Production needs a multi-stage build, `bun install --production`, `node dist/main`, and no bind mount.
+- Replace LocalStack with real SQS: drop `AWS_ENDPOINT_URL_SQS` and the dummy keys, use an IAM role; `new SQSClient()` already reads them from the environment.
+- Run migrations as a separate release step (job), not on app boot, since several instances start together.
+- Postgres: managed instance, secrets from a secret manager instead of `.env`, `postgres:13` is near end of life, move to a supported major.
+- Point the orchestrator's liveness probe at `/health/live` and readiness at `/health/ready`.
+- Graceful shutdown (`app.enableShutdownHooks()`) is not enabled; the README expects in-flight SQS messages to be handled on shutdown.
