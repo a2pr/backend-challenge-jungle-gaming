@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import Money from '../../src/money/Money.js';
+import Money from '../../src/money/money.js';
 
 const brl = (amount: string) => Money.from({ amount, currency: 'BRL' });
 const usd = (amount: string) => Money.from({ amount, currency: 'USD' });
@@ -11,21 +11,38 @@ describe('Money.from / zero', () => {
   });
 
   it('zero() is 0.00 in the given currency', () => {
-    expect(Money.zero('BRL').toJSON()).toEqual({ amount: '0.00', currency: 'BRL' });
+    expect(Money.zero('BRL').toJSON()).toEqual({
+      amount: '0.00',
+      currency: 'BRL',
+    });
     expect(Money.zero('BRL').isZero()).toBe(true);
   });
 
-  it.each(['', 'NaN', 'Infinity', '1e3', '1E3', '25', '25.0', '1.005', '1,00', '.50', ' 1.00', '1.00 ', 'abc'])(
-    'rejects invalid amount %j',
-    (amount) => {
-      expect(() => brl(amount)).toThrow();
+  it.each([
+    '',
+    'NaN',
+    'Infinity',
+    '1e3',
+    '1E3',
+    '25',
+    '25.0',
+    '1.005',
+    '1,00',
+    '.50',
+    ' 1.00',
+    '1.00 ',
+    'abc',
+  ])('rejects invalid amount %j', (amount) => {
+    expect(() => brl(amount)).toThrow();
+  });
+
+  it.each(['', 'br', 'BRLL', 'brl', 'B1L'])(
+    'rejects invalid currency %j',
+    (currency) => {
+      expect(() => Money.from({ amount: '1.00', currency })).toThrow();
+      expect(() => Money.zero(currency)).toThrow();
     },
   );
-
-  it.each(['', 'br', 'BRLL', 'brl', 'B1L'])('rejects invalid currency %j', (currency) => {
-    expect(() => Money.from({ amount: '1.00', currency })).toThrow();
-    expect(() => Money.zero(currency)).toThrow();
-  });
 
   it('round-trips through toJSON', () => {
     const m = brl('123456789.99');
@@ -61,7 +78,9 @@ describe('arithmetic', () => {
   });
 
   it('does not lose precision on large values', () => {
-    expect(brl('999999999999999999.99').add(brl('0.01')).toString()).toBe('1000000000000000000.00');
+    expect(brl('999999999999999999.99').add(brl('0.01')).toString()).toBe(
+      '1000000000000000000.00',
+    );
   });
 });
 
@@ -119,10 +138,14 @@ describe('currency mismatch', () => {
 
 describe('serialization', () => {
   it('JSON.stringify uses toJSON', () => {
-    expect(JSON.stringify({ price: brl('25.00') })).toBe('{"price":{"amount":"25.00","currency":"BRL"}}');
+    expect(JSON.stringify({ price: brl('25.00') })).toBe(
+      '{"price":{"amount":"25.00","currency":"BRL"}}',
+    );
   });
 
   it('never emits scientific notation', () => {
-    expect(brl('100000000000000000000000.00').toString()).toBe('100000000000000000000000.00');
+    expect(brl('100000000000000000000000.00').toString()).toBe(
+      '100000000000000000000000.00',
+    );
   });
 });

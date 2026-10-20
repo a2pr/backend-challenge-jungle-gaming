@@ -4,7 +4,7 @@ Decisions taken so far, section numbers refer to `README.md`. Infrastructure dec
 
 ## Money value object [6.1, 5.1]
 
-Code: `src/money/Money.ts`, DTO `src/money/dto/money.props.dto.ts`, tests `test/money/money.spec.ts`.
+Code: `../src/money/money.ts`, DTO `src/money/dto/money.props.dto.ts`, tests `test/money/money.spec.ts`.
 
 ### Decisions
 

@@ -11,7 +11,8 @@ Status against the README (`README.md`, section numbers in brackets). Updated 20
 | Docker Compose | `nest-app` (live reload via bind mount), `db` (postgres:13), `localstack` (SQS only) | `docker-compose.yaml` |
 | ORM wiring [4] | MikroORM v7 + `@mikro-orm/nestjs`, config from `DATABASE_URL`, schema-file discovery (`*.schema.ts`) | `src/mikro-orm.config.ts`, `src/app.module.ts` |
 | Health checks [9] | `GET /health/live` always 200. `GET /health/ready` probes Postgres (`select 1`) and SQS (`ListQueues`), 2 s timeout each, 503 with per-dependency booleans on failure | `src/health.*.ts` |
-| Money value object [6.1] | `Money` on `decimal.js`: scale-2 string in/out, immutable, currency-mismatch errors, sign predicates. 38 unit tests passing (`0.1 + 0.2`, invalid inputs, `negate` of zero, mismatch on every binary op, JSON round trip) | `src/money/Money.ts`, `src/money/dto/money.props.dto.ts`, `test/money/money.spec.ts` |
+| Money value object [6.1] | `Money` on `decimal.js`: scale-2 string in/out, immutable, currency-mismatch errors, sign predicates. 38 unit tests passing (`0.1 + 0.2`, invalid inputs, `negate` of zero, mismatch on every binary op, JSON round trip) | `../src/money/money.ts`, `src/money/dto/money.props.dto.ts`, `test/money/money.spec.ts` |
+| Domain stubs [6.3, 6.4] | `WagerTransaction` (+ kind/status enums), `WalletLedgerEntry` and `LedgerDirection` copied from the README skeleton so the project compiles. Method bodies throw `not implemented`; `FailureCode` holds only the 3 codes the README names; `InvalidTransactionStateError` is an empty class. **No behavior yet** | `src/wager/*`, `src/wallet/walletLedgerEntry.ts` |
 | SQS client | `@aws-sdk/client-sqs` added; endpoint/region/credentials via `AWS_*` env vars (no config code) | `docker-compose.yaml` |
 
 ## Decisions taken so far (Money decisions are already in `ARCHITECTURE.md`; the rest are to be copied)
@@ -26,7 +27,7 @@ Status against the README (`README.md`, section numbers in brackets). Updated 20
 
 | Area | Points | Gap |
 |---|---|---|
-| Domain model [6] | 20+10 | `Money` done. No `Wallet`, `WagerTransaction`, `WalletLedgerEntry`. Domain must not import ORM or Nest decorators, so map via `EntitySchema` |
+| Domain model [6] | 20+10 | `Money` done. `Wallet` partial (`open` only). `WagerTransaction` and `WalletLedgerEntry` are compile-only stubs. Domain must not import ORM or Nest decorators, so map via `EntitySchema` |
 | Migrations [4] | - | None. Must be versioned and reversible. No migration scripts in `package.json` yet |
 | API [9] | - | No wallet or transaction endpoints, no reconciliation endpoint |
 | Idempotency, concurrency [7, 8] | 35 | Nothing. Needs persistent dedup, locking strategy (`LockMode` or versioning), multi-instance test |
@@ -37,6 +38,19 @@ Status against the README (`README.md`, section numbers in brackets). Updated 20
 | Postman collection | - | Required by project instructions, missing |
 | Docs | 5 | `ARCHITECTURE.md` started (Money section only). `tests.md` and taxonomy file missing. `deployment.md` written |
 | Auth [2] | 0 | Not started. README accepts skipping if the decision and extension point (no-op guard/port) are documented |
+
+## WagerTransaction stubs: decisions deferred
+
+Stubs exist only so `tsc` passes. Props types (`CreateWagerTransactionProps`, `WagerTransactionState`, `CreateLedgerEntryProps`, `LedgerEntryState`) are `unknown`. Open points, to decide before implementing:
+
+- **State machine.** Valid transitions undefined. Proposal: `PENDING` to any of the other four; `PENDING_REFERENCE` to `PROCESSED`/`REJECTED`/`FAILED`/itself; terminals throw `InvalidTransactionStateError`. Decide whether `processedAt` is set only on `PROCESSED`.
+- **`PENDING_REFERENCE` retry state** (attempts, `nextAttemptAt`, first-seen for TTL) has no field in the skeleton [7.1]. Nullable fields on the transaction, or a separate table.
+- **`create` validation by kind.** `OPENING` must be creatable internally (block it at API/consumer, not in the factory). Reference required for `REFUND`/`ROLLBACK`, forbidden for `BET`/`OPENING`, optional for `WIN`, unspecified for `LOSS`. Amount must be positive; zero `LOSS` and zero `OPENING` undecided.
+- **`ledgerDirectionFor`.** `OPENING`/`WIN`/`REFUND` credit, `BET` debit, `LOSS` no entry, `ROLLBACK` inverse of the reference.
+- **Reference rules 2-5 have no method.** Needs a pure check returning a `FailureCode`. Rule 4 is ambiguous: read literally, a `BET` could be both refunded and rolled back (double credit). Proposed reading: at most one `PROCESSED` reversal per transaction, enforced by a unique index or the wallet lock, not only in memory.
+- **Idempotency.** Relation between `idempotencyKey`, `(providerId, externalTransactionId)` and `payloadHash` undefined. Proposal: unique `(providerId, idempotencyKey)` and `(providerId, externalTransactionId)`; same key with another hash is 409.
+- **`FailureCode` taxonomy** [7.2] and the `reject` vs `fail` boundary (`fail` on DLQ / non-retryable) are open.
+- `Wallet.rehydrate`, `debit` and `credit` are also still `todo`.
 
 ## Known issues and risks
 
@@ -55,6 +69,7 @@ Status against the README (`README.md`, section numbers in brackets). Updated 20
 ## Suggested next steps (smallest path to the scoring weight)
 
 1. ~~`Money` value object + unit tests~~ done 2026-10-20.
+   - Next in the domain: decide the open points under "WagerTransaction stubs", then implement `WagerTransaction`, `WalletLedgerEntry`, `Wallet.debit/credit` with unit tests.
 2. `Wallet` / ledger schemas + first migration, with up/down scripts.
 3. Submit-transaction use case with persistent idempotency key and row lock; concurrency test against real Postgres.
 4. Provision queues (LocalStack init script), then inbox/outbox and consumer.
