@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import Money from "../../../src/money/money.js";
+import {CurrencyMistMatchError, InvalidMoneyError} from "../../../src/money/errors.js";
 
 const brl = (amount: string) => Money.from({ amount, currency: 'BRL' });
 const usd = (amount: string) => Money.from({ amount, currency: 'USD' });
@@ -33,7 +34,7 @@ describe('Money.from / zero', () => {
     '1.00 ',
     'abc',
   ])('rejects invalid amount %j', (amount) => {
-    expect(() => brl(amount)).toThrow();
+    expect(() => brl(amount)).toThrow(InvalidMoneyError);
   });
 
   it.each(['', 'br', 'BRLL', 'brl', 'B1L'])(
@@ -132,7 +133,7 @@ describe('currency mismatch', () => {
     ['isLessThan', (a: Money, b: Money) => a.isLessThan(b)],
     ['equals', (a: Money, b: Money) => a.equals(b)],
   ])('%s throws for BRL vs USD', (_name, op) => {
-    expect(() => op(brl('1.00'), usd('1.00'))).toThrow();
+    expect(() => op(brl('1.00'), usd('1.00'))).toThrow(CurrencyMistMatchError);
   });
 });
 

@@ -1,5 +1,6 @@
 import MoneyProps from './dto/money.props.dto.js';
 import { Decimal } from 'decimal.js';
+import {InvalidMoneyError, CurrencyMistMatchError} from "./errors.js";
 
 const regexCurrency = /^[A-Z]{3}$/;
 const regexValue = /^-?\d+\.\d{2}$/;
@@ -14,7 +15,7 @@ export default class Money {
       throw Error('Not valid currency for money');
     }
     if (!regexValue.test(props.amount)) {
-      throw Error('Not value for money');
+      throw new InvalidMoneyError('Not value for money');
     }
     return new Money(new Decimal(props.amount), props.currency);
   }
@@ -77,7 +78,7 @@ export default class Money {
 
   private assertSameCurrency(other: Money): void {
     if (this.currency !== other.currency) {
-      throw Error('not same currency issue ');
+      throw new CurrencyMistMatchError(this.currency, other.currency);
     }
   }
 }
