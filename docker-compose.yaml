@@ -25,5 +25,17 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
+  localstack:
+    container_name: "${LOCALSTACK_DOCKER_NAME:-localstack-main}"
+    image: localstack/localstack:4.4 # ponytail: last tag usable without LOCALSTACK_AUTH_TOKEN; newer tags (incl. latest/pro) require one
+    environment:
+      SERVICES: sqs
+    ports:
+      - "127.0.0.1:4566:4566"            # LocalStack Gateway
+      - "127.0.0.1:4510-4559:4510-4559"  # external services port range
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - "/var/run/docker.sock:/var/run/docker.sock"
 volumes:
   postgres-data:
+  localstack-data:
