@@ -23,6 +23,7 @@
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-sqs": "^3.1153.0",
     "@mikro-orm/core": "^7.2.5",
     "@mikro-orm/nestjs": "^7.1.0",
     "@mikro-orm/postgresql": "^7.2.5",
