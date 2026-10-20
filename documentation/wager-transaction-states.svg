@@ -1,0 +1,208 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1580" viewBox="0 0 1600 1580" font-family="Lato, 'Helvetica Neue', Helvetica, Arial, sans-serif">
+<defs>
+<marker id="a-1C7ED6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1C7ED6"/></marker>
+<marker id="a-2F9E44" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2F9E44"/></marker>
+<marker id="a-868E96" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#868E96"/></marker>
+<marker id="a-E03131" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#E03131"/></marker>
+<marker id="a-E8590C" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#E8590C"/></marker>
+</defs>
+<rect width="1600" height="1580" fill="#ffffff"/>
+<text x="40" y="44" font-size="26" font-weight="700" fill="#212529" text-anchor="start" >WagerTransaction: states and scenarios, start to end</text>
+<text x="40" y="70" font-size="13" font-weight="400" fill="#495057" text-anchor="start" >Decisions D2, D3, D4, D5, D7, D8, D9, D18 (documentation/ARCHITECTURE.md). Double border = terminal state. HTTP codes are for POST /wagering/transactions; GETs always return 200 for a stored transaction.</text>
+<text x="40" y="112" font-size="19" font-weight="700" fill="#212529" text-anchor="start" >1. State machine</text>
+<rect x="70" y="222" width="250" height="84" rx="10" fill="#F1F3F5" stroke="#868E96" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="195.0" y="250" font-size="17" font-weight="700" fill="#343A40" text-anchor="middle" >PENDING</text>
+<text x="195.0" y="270" font-size="11.5" font-weight="400" fill="#343A40" text-anchor="middle" >in memory only, never stored</text>
+<text x="195.0" y="286" font-size="11.5" font-weight="400" fill="#343A40" text-anchor="middle" >starts every transaction</text>
+<rect x="580" y="362" width="300" height="84" rx="10" fill="#E7F5FF" stroke="#1C7ED6" stroke-width="2" />
+<text x="730.0" y="390" font-size="17" font-weight="700" fill="#0B4F8A" text-anchor="middle" >PENDING_REFERENCE</text>
+<text x="730.0" y="410" font-size="11.5" font-weight="400" fill="#0B4F8A" text-anchor="middle" >stored, a worker retries it</text>
+<text x="730.0" y="426" font-size="11.5" font-weight="400" fill="#0B4F8A" text-anchor="middle" >3 retries, about 140 s in total</text>
+<rect x="1225" y="145" width="300" height="94" rx="14" fill="none" stroke="#2F9E44" stroke-width="1.4"/>
+<rect x="1230" y="150" width="290" height="84" rx="10" fill="#EBFBEE" stroke="#2F9E44" stroke-width="2" />
+<text x="1375.0" y="178" font-size="17" font-weight="700" fill="#1B6B2E" text-anchor="middle" >PROCESSED</text>
+<text x="1375.0" y="198" font-size="11.5" font-weight="400" fill="#1B6B2E" text-anchor="middle" >balance and ledger changed</text>
+<text x="1375.0" y="214" font-size="11.5" font-weight="400" fill="#1B6B2E" text-anchor="middle" >(LOSS: recorded, balance unchanged)</text>
+<rect x="1225" y="285" width="300" height="94" rx="14" fill="none" stroke="#E8590C" stroke-width="1.4"/>
+<rect x="1230" y="290" width="290" height="84" rx="10" fill="#FFF4E6" stroke="#E8590C" stroke-width="2" />
+<text x="1375.0" y="318" font-size="17" font-weight="700" fill="#9C3E08" text-anchor="middle" >REJECTED</text>
+<text x="1375.0" y="338" font-size="11.5" font-weight="400" fill="#9C3E08" text-anchor="middle" >a business rule said no</text>
+<text x="1375.0" y="354" font-size="11.5" font-weight="400" fill="#9C3E08" text-anchor="middle" >stored with failureCode, no ledger entry</text>
+<rect x="1225" y="425" width="300" height="94" rx="14" fill="none" stroke="#E03131" stroke-width="1.4"/>
+<rect x="1230" y="430" width="290" height="84" rx="10" fill="#FFF5F5" stroke="#E03131" stroke-width="2" />
+<text x="1375.0" y="458" font-size="17" font-weight="700" fill="#A61E1E" text-anchor="middle" >FAILED</text>
+<text x="1375.0" y="478" font-size="11.5" font-weight="400" fill="#A61E1E" text-anchor="middle" >well-formed message, last receive failed</text>
+<text x="1375.0" y="494" font-size="11.5" font-weight="400" fill="#A61E1E" text-anchor="middle" >stored with PROCESSING_ERROR</text>
+<path d="M 320,286 L 578,388" fill="none" stroke="#1C7ED6" stroke-width="2.2" marker-end="url(#a-1C7ED6)"/>
+<rect x="394" y="406" width="152" height="17" rx="4" fill="#fff" fill-opacity="0.92"/>
+<text x="470" y="418" font-size="11.5" font-weight="400" fill="#0B4F8A" text-anchor="middle" >reference not found yet</text>
+<path d="M 320,244 L 1228,186" fill="none" stroke="#2F9E44" stroke-width="2.2" marker-end="url(#a-2F9E44)"/>
+<rect x="731" y="188" width="97" height="17" rx="4" fill="#fff" fill-opacity="0.92"/>
+<text x="780" y="200" font-size="11.5" font-weight="400" fill="#1B6B2E" text-anchor="middle" >all rules pass</text>
+<path d="M 320,266 L 1228,326" fill="none" stroke="#E8590C" stroke-width="2.2" marker-end="url(#a-E8590C)"/>
+<rect x="781" y="276" width="238" height="17" rx="4" fill="#fff" fill-opacity="0.92"/>
+<text x="900" y="288" font-size="11.5" font-weight="400" fill="#9C3E08" text-anchor="middle" >a business rule says no (failureCode)</text>
+<path d="M 320,302 C 380,660 1050,660 1228,478" fill="none" stroke="#E03131" stroke-width="2.2" marker-end="url(#a-E03131)"/>
+<rect x="570" y="606" width="329" height="17" rx="4" fill="#fff" fill-opacity="0.92"/>
+<text x="735" y="618" font-size="11.5" font-weight="400" fill="#A61E1E" text-anchor="middle" >consumer's last receive fails (PROCESSING_ERROR, D8)</text>
+<path d="M 882,382 L 1228,200" fill="none" stroke="#2F9E44" stroke-width="2.2" marker-end="url(#a-2F9E44)"/>
+<rect x="900" y="342" width="171" height="17" rx="4" fill="#fff" fill-opacity="0.92"/>
+<text x="985" y="354" font-size="11.5" font-weight="400" fill="#1B6B2E" text-anchor="middle" >reference is now PROCESSED</text>
+<path d="M 882,404 L 1228,346" fill="none" stroke="#E8590C" stroke-width="2.2" marker-end="url(#a-E8590C)"/>
+<rect x="940" y="406" width="219" height="17" rx="4" fill="#fff" fill-opacity="0.92"/>
+<text x="1050" y="418" font-size="11.5" font-weight="400" fill="#9C3E08" text-anchor="middle" >retries exhausted, or a rule fails</text>
+<path d="M 882,430 L 1228,468" fill="none" stroke="#E03131" stroke-width="2.2" marker-end="url(#a-E03131)"/>
+<rect x="919" y="456" width="183" height="17" rx="4" fill="#fff" fill-opacity="0.92"/>
+<text x="1010" y="468" font-size="11.5" font-weight="400" fill="#A61E1E" text-anchor="middle" >permanent error on reprocess</text>
+<path d="M 660,448 C 640,526 820,526 800,448" fill="none" stroke="#1C7ED6" stroke-width="2.2" marker-end="url(#a-1C7ED6)"/>
+<rect x="626" y="528" width="207" height="17" rx="4" fill="#fff" fill-opacity="0.92"/>
+<text x="730" y="540" font-size="11.5" font-weight="400" fill="#0B4F8A" text-anchor="middle" >retry again: +20 s, +40 s, +80 s</text>
+<text x="40" y="672" font-size="19" font-weight="700" fill="#212529" text-anchor="start" >2. Scenarios</text>
+<text x="240" y="672" font-size="13" font-weight="400" fill="#495057" text-anchor="start" >each row is one path through the states, with what the caller and the database see at the end</text>
+<rect x="24" y="692" width="1552" height="64" rx="8" fill="#F8F9FA"/>
+<text x="40" y="719" font-size="14" font-weight="700" fill="#212529" text-anchor="start" >1. BET with enough funds</text>
+<text x="40" y="738" font-size="11.5" font-weight="400" fill="#6C757D" text-anchor="start" >HTTP or SQS call the same use case</text>
+<rect x="470" y="706" width="92" height="36" rx="8" fill="#F1F3F5" stroke="#868E96" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="516.15" y="728.5" font-size="13" font-weight="700" fill="#343A40" text-anchor="middle" >PENDING</text>
+<path d="M 565,724 L 592,724" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="596" y="706" width="110" height="36" rx="8" fill="#EBFBEE" stroke="#2F9E44" stroke-width="2" />
+<text x="651.3499999999999" y="728.5" font-size="13" font-weight="700" fill="#1B6B2E" text-anchor="middle" >PROCESSED</text>
+<text x="724.4" y="728.5" font-size="12" font-weight="400" fill="#495057" text-anchor="start" >200 · DEBIT ledger entry · balance, ledger and events commit together</text>
+<text x="40" y="783" font-size="14" font-weight="700" fill="#212529" text-anchor="start" >2. BET without enough funds</text>
+<text x="40" y="802" font-size="11.5" font-weight="400" fill="#6C757D" text-anchor="start" >balance is lower than the amount</text>
+<rect x="470" y="770" width="92" height="36" rx="8" fill="#F1F3F5" stroke="#868E96" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="516.15" y="792.5" font-size="13" font-weight="700" fill="#343A40" text-anchor="middle" >PENDING</text>
+<path d="M 565,788 L 592,788" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="596" y="766" width="149" height="44" rx="8" fill="#FFF4E6" stroke="#E8590C" stroke-width="2" />
+<text x="670.6999999999999" y="785.0" font-size="13" font-weight="700" fill="#9C3E08" text-anchor="middle" >REJECTED</text>
+<text x="670.6999999999999" y="801.0" font-size="10.5" font-weight="400" fill="#9C3E08" text-anchor="middle" >INSUFFICIENT_FUNDS</text>
+<text x="763.0999999999999" y="792.5" font-size="12" font-weight="400" fill="#495057" text-anchor="start" >422 · row stored for audit · no ledger entry · balance unchanged</text>
+<rect x="24" y="820" width="1552" height="64" rx="8" fill="#F8F9FA"/>
+<text x="40" y="847" font-size="14" font-weight="700" fill="#212529" text-anchor="start" >3. LOSS</text>
+<text x="40" y="866" font-size="11.5" font-weight="400" fill="#6C757D" text-anchor="start" >records the result, moves nothing</text>
+<rect x="470" y="834" width="92" height="36" rx="8" fill="#F1F3F5" stroke="#868E96" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="516.15" y="856.5" font-size="13" font-weight="700" fill="#343A40" text-anchor="middle" >PENDING</text>
+<path d="M 565,852 L 592,852" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="596" y="834" width="110" height="36" rx="8" fill="#EBFBEE" stroke="#2F9E44" stroke-width="2" />
+<text x="651.3499999999999" y="856.5" font-size="13" font-weight="700" fill="#1B6B2E" text-anchor="middle" >PROCESSED</text>
+<text x="724.4" y="856.5" font-size="12" font-weight="400" fill="#495057" text-anchor="start" >200 · no ledger entry · no WalletBalanceChanged event</text>
+<text x="40" y="911" font-size="14" font-weight="700" fill="#212529" text-anchor="start" >4. WIN, REFUND or ROLLBACK, reference PROCESSED</text>
+<text x="40" y="930" font-size="11.5" font-weight="400" fill="#6C757D" text-anchor="start" >same provider, player, wallet, currency, round</text>
+<rect x="470" y="898" width="92" height="36" rx="8" fill="#F1F3F5" stroke="#868E96" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="516.15" y="920.5" font-size="13" font-weight="700" fill="#343A40" text-anchor="middle" >PENDING</text>
+<path d="M 565,916 L 592,916" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="596" y="898" width="110" height="36" rx="8" fill="#EBFBEE" stroke="#2F9E44" stroke-width="2" />
+<text x="651.3499999999999" y="920.5" font-size="13" font-weight="700" fill="#1B6B2E" text-anchor="middle" >PROCESSED</text>
+<text x="724.4" y="920.5" font-size="12" font-weight="400" fill="#495057" text-anchor="start" >200 · CREDIT, or the inverse of the referenced entry</text>
+<rect x="24" y="948" width="1552" height="64" rx="8" fill="#F8F9FA"/>
+<text x="40" y="975" font-size="14" font-weight="700" fill="#212529" text-anchor="start" >5. A rule is broken</text>
+<text x="40" y="994" font-size="11.5" font-weight="400" fill="#6C757D" text-anchor="start" >mismatch, kind, amount, reversed twice, no funds</text>
+<rect x="470" y="962" width="92" height="36" rx="8" fill="#F1F3F5" stroke="#868E96" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="516.15" y="984.5" font-size="13" font-weight="700" fill="#343A40" text-anchor="middle" >PENDING</text>
+<path d="M 565,980 L 592,980" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="596" y="958" width="155" height="44" rx="8" fill="#FFF4E6" stroke="#E8590C" stroke-width="2" />
+<text x="674.0" y="977.0" font-size="13" font-weight="700" fill="#9C3E08" text-anchor="middle" >REJECTED</text>
+<text x="674.0" y="993.0" font-size="10.5" font-weight="400" fill="#9C3E08" text-anchor="middle" >failureCode from D7</text>
+<text x="769.6999999999999" y="984.5" font-size="12" font-weight="400" fill="#495057" text-anchor="start" >422 · e.g. ALREADY_REVERSED, INSUFFICIENT_FUNDS_FOR_REVERSAL (ROLLBACK)</text>
+<text x="40" y="1039" font-size="14" font-weight="700" fill="#212529" text-anchor="start" >6. Reference arrives late</text>
+<text x="40" y="1058" font-size="11.5" font-weight="400" fill="#6C757D" text-anchor="start" >REFUND before its BET (same for WIN, LOSS, ROLLBACK)</text>
+<rect x="470" y="1026" width="92" height="36" rx="8" fill="#F1F3F5" stroke="#868E96" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="516.15" y="1048.5" font-size="13" font-weight="700" fill="#343A40" text-anchor="middle" >PENDING</text>
+<path d="M 565,1044 L 592,1044" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="596" y="1026" width="181" height="36" rx="8" fill="#E7F5FF" stroke="#1C7ED6" stroke-width="2" />
+<text x="686.9499999999999" y="1048.5" font-size="13" font-weight="700" fill="#0B4F8A" text-anchor="middle" >PENDING_REFERENCE</text>
+<path d="M 781,1044 L 808,1044" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="812" y="1026" width="60" height="36" rx="18" fill="#FFFFFF" stroke="#ADB5BD" stroke-width="1.5" />
+<text x="841.3499999999999" y="1048.5" font-size="12" font-weight="400" fill="#495057" text-anchor="middle" >+20 s</text>
+<path d="M 874,1044 L 901,1044" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="905" y="1026" width="173" height="36" rx="18" fill="#FFFFFF" stroke="#ADB5BD" stroke-width="1.5" />
+<text x="991.8" y="1048.5" font-size="12" font-weight="400" fill="#495057" text-anchor="middle" >+40 s: reference found</text>
+<path d="M 1082,1044 L 1108,1044" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="1112" y="1026" width="110" height="36" rx="8" fill="#EBFBEE" stroke="#2F9E44" stroke-width="2" />
+<text x="1167.55" y="1048.5" font-size="13" font-weight="700" fill="#1B6B2E" text-anchor="middle" >PROCESSED</text>
+<text x="1240.6" y="1048.5" font-size="12" font-weight="400" fill="#495057" text-anchor="start" >202, then PROCESSED by the worker · credited once</text>
+<rect x="24" y="1076" width="1552" height="64" rx="8" fill="#F8F9FA"/>
+<text x="40" y="1103" font-size="14" font-weight="700" fill="#212529" text-anchor="start" >7. Reference never arrives</text>
+<text x="40" y="1122" font-size="11.5" font-weight="400" fill="#6C757D" text-anchor="start" >the BET is never received</text>
+<rect x="470" y="1090" width="92" height="36" rx="8" fill="#F1F3F5" stroke="#868E96" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="516.15" y="1112.5" font-size="13" font-weight="700" fill="#343A40" text-anchor="middle" >PENDING</text>
+<path d="M 565,1108 L 592,1108" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="596" y="1090" width="181" height="36" rx="8" fill="#E7F5FF" stroke="#1C7ED6" stroke-width="2" />
+<text x="686.9499999999999" y="1112.5" font-size="13" font-weight="700" fill="#0B4F8A" text-anchor="middle" >PENDING_REFERENCE</text>
+<path d="M 781,1108 L 808,1108" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="812" y="1090" width="60" height="36" rx="18" fill="#FFFFFF" stroke="#ADB5BD" stroke-width="1.5" />
+<text x="841.3499999999999" y="1112.5" font-size="12" font-weight="400" fill="#495057" text-anchor="middle" >+20 s</text>
+<path d="M 874,1108 L 901,1108" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="905" y="1090" width="60" height="36" rx="18" fill="#FFFFFF" stroke="#ADB5BD" stroke-width="1.5" />
+<text x="934.8499999999999" y="1112.5" font-size="12" font-weight="400" fill="#495057" text-anchor="middle" >+40 s</text>
+<path d="M 968,1108 L 995,1108" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="999" y="1090" width="60" height="36" rx="18" fill="#FFFFFF" stroke="#ADB5BD" stroke-width="1.5" />
+<text x="1028.35" y="1112.5" font-size="12" font-weight="400" fill="#495057" text-anchor="middle" >+80 s</text>
+<path d="M 1061,1108 L 1088,1108" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="1092" y="1086" width="155" height="44" rx="8" fill="#FFF4E6" stroke="#E8590C" stroke-width="2" />
+<text x="1169.8" y="1105.0" font-size="13" font-weight="700" fill="#9C3E08" text-anchor="middle" >REJECTED</text>
+<text x="1169.8" y="1121.0" font-size="10.5" font-weight="400" fill="#9C3E08" text-anchor="middle" >REFERENCE_NOT_FOUND</text>
+<text x="1265.5" y="1112.5" font-size="12" font-weight="400" fill="#495057" text-anchor="start" >202, REJECTED after ~140 s · event published</text>
+<text x="40" y="1167" font-size="14" font-weight="700" fill="#212529" text-anchor="start" >8. Reference was REJECTED or FAILED</text>
+<text x="40" y="1186" font-size="11.5" font-weight="400" fill="#6C757D" text-anchor="start" >it will never be applied, so no waiting</text>
+<rect x="470" y="1154" width="92" height="36" rx="8" fill="#F1F3F5" stroke="#868E96" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="516.15" y="1176.5" font-size="13" font-weight="700" fill="#343A40" text-anchor="middle" >PENDING</text>
+<path d="M 565,1172 L 592,1172" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="596" y="1150" width="182" height="44" rx="8" fill="#FFF4E6" stroke="#E8590C" stroke-width="2" />
+<text x="687.1999999999999" y="1169.0" font-size="13" font-weight="700" fill="#9C3E08" text-anchor="middle" >REJECTED</text>
+<text x="687.1999999999999" y="1185.0" font-size="10.5" font-weight="400" fill="#9C3E08" text-anchor="middle" >REFERENCE_NOT_PROCESSED</text>
+<text x="796.0999999999999" y="1176.5" font-size="12" font-weight="400" fill="#495057" text-anchor="start" >422 immediately (D18)</text>
+<rect x="24" y="1204" width="1552" height="64" rx="8" fill="#F8F9FA"/>
+<text x="40" y="1231" font-size="14" font-weight="700" fill="#212529" text-anchor="start" >9. Reference is itself waiting</text>
+<text x="40" y="1250" font-size="11.5" font-weight="400" fill="#6C757D" text-anchor="start" >ROLLBACK of a REFUND that waits for its BET</text>
+<rect x="470" y="1218" width="92" height="36" rx="8" fill="#F1F3F5" stroke="#868E96" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="516.15" y="1240.5" font-size="13" font-weight="700" fill="#343A40" text-anchor="middle" >PENDING</text>
+<path d="M 565,1236 L 592,1236" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="596" y="1218" width="181" height="36" rx="8" fill="#E7F5FF" stroke="#1C7ED6" stroke-width="2" />
+<text x="686.9499999999999" y="1240.5" font-size="13" font-weight="700" fill="#0B4F8A" text-anchor="middle" >PENDING_REFERENCE</text>
+<path d="M 781,1236 L 808,1236" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="812" y="1218" width="227" height="36" rx="18" fill="#FFFFFF" stroke="#ADB5BD" stroke-width="1.5" />
+<text x="925.0999999999999" y="1240.5" font-size="12" font-weight="400" fill="#495057" text-anchor="middle" >+20 s: reference now PROCESSED</text>
+<path d="M 1042,1236 L 1069,1236" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="1073" y="1218" width="110" height="36" rx="8" fill="#EBFBEE" stroke="#2F9E44" stroke-width="2" />
+<text x="1127.6499999999999" y="1240.5" font-size="13" font-weight="700" fill="#1B6B2E" text-anchor="middle" >PROCESSED</text>
+<text x="1200.6999999999998" y="1240.5" font-size="12" font-weight="400" fill="#495057" text-anchor="start" >202, same timeline as 6 (D18)</text>
+<text x="40" y="1295" font-size="14" font-weight="700" fill="#212529" text-anchor="start" >10. Poison message, last receive fails</text>
+<text x="40" y="1314" font-size="11.5" font-weight="400" fill="#6C757D" text-anchor="start" >well-formed, keeps failing (receive 5 of 5)</text>
+<rect x="470" y="1282" width="92" height="36" rx="8" fill="#F1F3F5" stroke="#868E96" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="516.15" y="1304.5" font-size="13" font-weight="700" fill="#343A40" text-anchor="middle" >PENDING</text>
+<path d="M 565,1300 L 592,1300" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="596" y="1278" width="136" height="44" rx="8" fill="#FFF5F5" stroke="#E03131" stroke-width="2" />
+<text x="664.0999999999999" y="1297.0" font-size="13" font-weight="700" fill="#A61E1E" text-anchor="middle" >FAILED</text>
+<text x="664.0999999999999" y="1313.0" font-size="10.5" font-weight="400" fill="#A61E1E" text-anchor="middle" >PROCESSING_ERROR</text>
+<path d="M 735,1300 L 762,1300" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="766" y="1282" width="207" height="36" rx="18" fill="#FFFFFF" stroke="#ADB5BD" stroke-width="1.5" />
+<text x="869.35" y="1304.5" font-size="12" font-weight="400" fill="#495057" text-anchor="middle" >message to the DLQ, deleted</text>
+<text x="990.8" y="1304.5" font-size="12" font-weight="400" fill="#495057" text-anchor="start" >row stored · no event · a DLQ redrive replays FAILED (new key to retry)</text>
+<rect x="24" y="1332" width="1552" height="64" rx="8" fill="#F8F9FA"/>
+<text x="40" y="1359" font-size="14" font-weight="700" fill="#212529" text-anchor="start" >11. Malformed message, unknown wallet</text>
+<text x="40" y="1378" font-size="11.5" font-weight="400" fill="#6C757D" text-anchor="start" >nothing can be stored</text>
+<rect x="470" y="1346" width="142" height="36" rx="8" fill="#FFFFFF" stroke="#ADB5BD" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="541.0" y="1368.5" font-size="12" font-weight="400" fill="#495057" text-anchor="middle" >no row, no state</text>
+<path d="M 615,1364 L 642,1364" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="646" y="1346" width="80" height="36" rx="18" fill="#FFFFFF" stroke="#ADB5BD" stroke-width="1.5" />
+<text x="685.8" y="1368.5" font-size="12" font-weight="400" fill="#495057" text-anchor="middle" >SQS: DLQ</text>
+<text x="743.6" y="1368.5" font-size="12" font-weight="400" fill="#495057" text-anchor="start" >HTTP: 400 or 404, nothing stored · SQS: DLQ, no row</text>
+<text x="40" y="1423" font-size="14" font-weight="700" fill="#212529" text-anchor="start" >12. Replay: same key, same payload</text>
+<text x="40" y="1442" font-size="11.5" font-weight="400" fill="#6C757D" text-anchor="start" >provider retries a request</text>
+<rect x="470" y="1410" width="128" height="36" rx="8" fill="#FFFFFF" stroke="#ADB5BD" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="534.0" y="1432.5" font-size="12" font-weight="400" fill="#495057" text-anchor="middle" >existing state</text>
+<path d="M 601,1428 L 628,1428" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="632" y="1410" width="147" height="36" rx="18" fill="#FFFFFF" stroke="#ADB5BD" stroke-width="1.5" />
+<text x="705.3" y="1432.5" font-size="12" font-weight="400" fill="#495057" text-anchor="middle" >returned as stored</text>
+<text x="796.6" y="1432.5" font-size="12" font-weight="400" fill="#495057" text-anchor="start" >same status code and body · idempotentReplay: true · no new effect</text>
+<rect x="24" y="1460" width="1552" height="64" rx="8" fill="#F8F9FA"/>
+<text x="40" y="1487" font-size="14" font-weight="700" fill="#212529" text-anchor="start" >13. Same key, different payload</text>
+<text x="40" y="1506" font-size="11.5" font-weight="400" fill="#6C757D" text-anchor="start" >payloadHash does not match</text>
+<rect x="470" y="1474" width="205" height="36" rx="8" fill="#FFFFFF" stroke="#ADB5BD" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="572.5" y="1496.5" font-size="12" font-weight="400" fill="#495057" text-anchor="middle" >existing state, untouched</text>
+<path d="M 678,1492 L 705,1492" stroke="#868E96" stroke-width="2" marker-end="url(#a-868E96)"/>
+<rect x="709" y="1474" width="106" height="36" rx="18" fill="#FFFFFF" stroke="#ADB5BD" stroke-width="1.5" />
+<text x="762.2" y="1496.5" font-size="12" font-weight="400" fill="#495057" text-anchor="middle" >409 conflict</text>
+<text x="833.4" y="1496.5" font-size="12" font-weight="400" fill="#495057" text-anchor="start" >nothing changes · a new key with a known external id is also 409</text>
+</svg>
