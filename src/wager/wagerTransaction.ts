@@ -11,6 +11,23 @@ const pendingStatuses = [
     WagerTransactionStatus.Pending,
     WagerTransactionStatus.PendingReference
 ];
+const ROLLBACKABLE = [
+    WagerTransactionKind.Bet,
+    WagerTransactionKind.Win,
+    WagerTransactionKind.Refund,
+];
+
+const ALLOWED_REFERENCE_KINDS: Record<WagerTransactionKind, readonly WagerTransactionKind[]> = {
+    [WagerTransactionKind.Refund]: [WagerTransactionKind.Bet],
+    [WagerTransactionKind.Rollback]: [WagerTransactionKind.Bet, WagerTransactionKind.Win, WagerTransactionKind.Refund],
+    [WagerTransactionKind.Win]: [WagerTransactionKind.Bet],
+    [WagerTransactionKind.Loss]: [WagerTransactionKind.Bet],
+    [WagerTransactionKind.Bet]: [],
+    [WagerTransactionKind.Opening]: [],
+};
+
+const opposite = (d: LedgerDirection): LedgerDirection =>
+    d === LedgerDirection.Credit ? LedgerDirection.Debit : LedgerDirection.Credit;
 
 export const PENDING_REFERENCE_BACKOFF = {baseMs: 20_000, capMs: 120_000} as const;
 export const MAX_REFERENCE_RETRIES = 3;
@@ -44,17 +61,13 @@ export interface WagerTransactionState {
     money: Money,
     referenceExternalTransactionId: string | undefined
     createdAt: Date,
-    _status: WagerTransactionStatus,
-    _referenceTransactionId?: string
-    _failureCode?: FailureCode,
-    _processedAt?: Date,
-    _attempts: number,
-    _nextAttemptAt?: Date
+    status: WagerTransactionStatus,
+    referenceTransactionId?: string
+    failureCode?: FailureCode,
+    processedAt?: Date,
+    attempts: number,
+    nextAttemptAt?: Date
 }
-
-const notImplemented = (): never => {
-    throw new Error("not implemented");
-};
 
 export default class WagerTransaction {
     private constructor(
@@ -83,32 +96,32 @@ export default class WagerTransaction {
 
     /** Nasce em PENDING. Valida a exigência de referência por kind. */
     static create(_props: CreateWagerTransactionProps): WagerTransaction {
-        if ( _props.id.trim() === '') {
-            throw new InvalidWagerTransactionError('invalid id')
+        if (_props.id.trim() === '') {
+            throw new InvalidWagerTransactionError('id must not be blank')
         }
-        if ( _props.providerId.trim() === '') {
-            throw new InvalidWagerTransactionError('invalid id')
+        if (_props.providerId.trim() === '') {
+            throw new InvalidWagerTransactionError('providerId must not be blank')
         }
-        if ( _props.externalTransactionId.trim() === '') {
-            throw new InvalidWagerTransactionError('invalid id')
+        if (_props.externalTransactionId.trim() === '') {
+            throw new InvalidWagerTransactionError('externalTransactionId must not be blank')
         }
-        if ( _props.roundId.trim() === '') {
-            throw new InvalidWagerTransactionError('invalid id')
+        if (_props.roundId.trim() === '') {
+            throw new InvalidWagerTransactionError('roundId must not be blank')
         }
-        if ( _props.gameId.trim() === '' ) {
-            throw new InvalidWagerTransactionError('invalid id')
+        if (_props.gameId.trim() === '') {
+            throw new InvalidWagerTransactionError('gameId must not be blank')
         }
-        if ( _props.idempotencyKey.trim() === '') {
-            throw new InvalidWagerTransactionError('invalid id')
+        if (_props.idempotencyKey.trim() === '') {
+            throw new InvalidWagerTransactionError('idempotencyKey must not be blank')
         }
-        if ( _props.walletId.trim() === '') {
-            throw new InvalidWagerTransactionError('invalid id')
+        if (_props.walletId.trim() === '') {
+            throw new InvalidWagerTransactionError('walletId must not be blank')
         }
-        if ( _props.playerId.trim() === '' ) {
-            throw new InvalidWagerTransactionError('invalid id')
+        if (_props.playerId.trim() === '') {
+            throw new InvalidWagerTransactionError('playerId must not be blank')
         }
         if (_props.referenceExternalTransactionId === '') {
-            throw new InvalidWagerTransactionError('invalid id')
+            throw new InvalidWagerTransactionError('referenceExternalTransactionId must not be empty')
         }
 
         let hash: string = payloadHash(_props)
@@ -118,17 +131,17 @@ export default class WagerTransaction {
             case WagerTransactionKind.Bet:
                 if (_props.referenceExternalTransactionId === undefined) {
                     if (_props.money.isZero() || _props.money.isNegative()) {
-                        throw new InvalidWagerTransactionError('forbidden reference')
+                        throw new InvalidWagerTransactionError('BET amount must be greater than 0')
                     }
                 } else {
-                    throw new InvalidWagerTransactionError('Reference should not exist for Bet kind')
+                    throw new InvalidWagerTransactionError('BET must not have a reference')
                 }
                 break;
             case WagerTransactionKind.Win:
 
                 if (_props.referenceExternalTransactionId === undefined) {
                     if (_props.money.isZero() || _props.money.isNegative()) {
-                        throw new InvalidWagerTransactionError('no valid zero values')
+                        throw new InvalidWagerTransactionError('WIN amount must be greater than 0')
                     }
                     //created
                 } else {
@@ -136,7 +149,7 @@ export default class WagerTransaction {
                         //created
                     }
                     if (_props.money.isZero()) {
-                        throw new InvalidWagerTransactionError('no valid zero values')
+                        throw new InvalidWagerTransactionError('WIN amount must be greater than 0')
                     }
                 }
                 break;
@@ -144,7 +157,7 @@ export default class WagerTransaction {
                 if (_props.referenceExternalTransactionId === undefined) {
 
                     if (!_props.money.isZero() && !_props.money.isPositive()) {
-                        throw new InvalidWagerTransactionError('no valid minus values')
+                        throw new InvalidWagerTransactionError('LOSS amount must be 0 or more')
                     }
                 } else {
                     if (_props.money.isZero() || _props.money.isPositive()) {
@@ -156,28 +169,28 @@ export default class WagerTransaction {
                 if (_props.referenceExternalTransactionId === undefined) {
 
                     if (_props.money.isPositive() || _props.money.isZero()) {
-                        throw new InvalidWagerTransactionError('requires reference')
+                        throw new InvalidWagerTransactionError('REFUND requires a reference')
                     }
                 } else {
                     if (_props.money.isPositive()) {
                         //created
                     }
                     if (_props.money.isZero() || _props.money.isNegative()) {
-                        throw new InvalidWagerTransactionError('requires reference')
+                        throw new InvalidWagerTransactionError('REFUND amount must be greater than 0')
                     }
                 }
                 break;
             case WagerTransactionKind.Rollback:
                 if (_props.referenceExternalTransactionId === undefined) {
                     if (_props.money.isPositive() || _props.money.isZero()) {
-                        throw new InvalidWagerTransactionError('requires reference')
+                        throw new InvalidWagerTransactionError('ROLLBACK requires a reference')
                     }
                 } else {
                     if (_props.money.isPositive()) {
                         //created
                     }
                     if (_props.money.isZero() || _props.money.isNegative()) {
-                        throw new InvalidWagerTransactionError('requires reference')
+                        throw new InvalidWagerTransactionError('ROLLBACK amount must be greater than 0')
                     }
                 }
                 break;
@@ -187,19 +200,19 @@ export default class WagerTransaction {
                         //created
                     }
                     if (_props.money.isZero()) {
-                        throw new InvalidWagerTransactionError('requires reference')
+                        throw new InvalidWagerTransactionError('OPENING amount must be greater than 0')
                     }
                 } else {
 
                     if (_props.money.isPositive() || _props.money.isZero()) {
-                        throw new InvalidWagerTransactionError('requires reference')
+                        throw new InvalidWagerTransactionError('OPENING must not have a reference')
                     }
                 }
                 break;
         }
 
         if (_props.money.isNegative()) {
-            throw new InvalidWagerTransactionError('ANything that is not loss is not allow negative')
+            throw new InvalidWagerTransactionError(`${_props.kind} amount must not be negative`)
         }
 
         return new WagerTransaction(
@@ -219,7 +232,7 @@ export default class WagerTransaction {
             WagerTransactionStatus.Pending,
             undefined,
             undefined,
-            _props.now,
+            undefined,
             0,
             undefined
         )
@@ -240,12 +253,12 @@ export default class WagerTransaction {
             _state.money,
             _state.referenceExternalTransactionId,
             _state.createdAt,
-            _state._status,
-            _state._referenceTransactionId,
-            _state._failureCode,
-            _state._processedAt,
-            _state._attempts,
-            _state._nextAttemptAt,
+            _state.status,
+            _state.referenceTransactionId,
+            _state.failureCode,
+            _state.processedAt,
+            _state.attempts,
+            _state.nextAttemptAt,
         )
     }
 
@@ -275,14 +288,15 @@ export default class WagerTransaction {
 
     // ---- transições (lançam InvalidTransactionStateError se o estado atual for terminal)
     markProcessed(_referenceTransactionId: string | undefined, _at: Date): void {
-        this.assertPending()
+        this.assertPending(WagerTransactionStatus.Processed)
         this._referenceTransactionId = _referenceTransactionId
         this._processedAt = _at
         this._nextAttemptAt = undefined
+        this._status = WagerTransactionStatus.Processed
     }
 
     markPendingReference(now: Date): void {
-        this.assertPending();
+        this.assertPending(WagerTransactionStatus.PendingReference);
         if (this.retryLimitReached()) throw new Error('retry limit reached: reject instead');   // caller bug
         this._attempts = this.status === WagerTransactionStatus.Pending ? 0 : this._attempts + 1;
         this._status = WagerTransactionStatus.PendingReference;
@@ -294,10 +308,10 @@ export default class WagerTransaction {
     }
 
     reject(_code: FailureCode): void {
-        this.assertPending()
+        this.assertPending(WagerTransactionStatus.Rejected)
 
         if (_code === FailureCode.ProcessingError) {
-            return;
+            throw new Error('PROCESSING_ERROR is only valid for FAILED')
         }
         this._status = WagerTransactionStatus.Rejected
         this._failureCode = _code
@@ -305,12 +319,14 @@ export default class WagerTransaction {
     }
 
     fail(_code: FailureCode): void {
-        this.assertPending()
+        this.assertPending(WagerTransactionStatus.Failed)
         if (_code === FailureCode.ProcessingError) {
 
             this._status = WagerTransactionStatus.Failed
             this._failureCode = _code
             this._nextAttemptAt = undefined
+        } else {
+            throw new Error('Only processinErro accepted')
         }
     }
 
@@ -325,6 +341,11 @@ export default class WagerTransaction {
     requiresReference(): boolean {
         return this.kind === WagerTransactionKind.Refund || this.kind === WagerTransactionKind.Rollback
     }   // true para REFUND e ROLLBACK
+
+    hasReference(): boolean {
+        return this.referenceExternalTransactionId !== undefined
+    }
+
     matchesPayload(_payloadHash: string): boolean {
         return this.payloadHash === _payloadHash;
     }
@@ -341,21 +362,32 @@ export default class WagerTransaction {
                 throw new Error('LOSS has no ledger movement');          // caller must check affectsBalance()
             case WagerTransactionKind.Rollback:
                 if (!_reference) throw new Error('ROLLBACK needs its reference');
+                if (!ROLLBACKABLE.includes(_reference.kind)) {
+                    throw new Error(`ROLLBACK cannot undo ${_reference.kind}`);   // checkReference should have rejected it earlier
+                }
                 // a rollback undoes the reference, so it is the opposite of the reference's own direction
                 return opposite(_reference.ledgerDirectionFor());                  // BET, WIN, REFUND never need a reference
         }
     }
 
-    private assertPending(): void {
-        if (!pendingStatuses.includes(this.status)) {
-            throw new InvalidTransactionStateError(this.status, WagerTransactionStatus.Processed)
+    private assertPending(to: WagerTransactionStatus): void {
+        if (this.isTerminal()) {
+            throw new InvalidTransactionStateError(this.status, to)
         }
     }
 
-    /*
-        static assertWagerTransactionReference(_props: CreateWagerTransactionProps){
-            if(_props.kind === 'BET'){
-                if(_props.referenceExternalTransactionId != null)
-            }
-        }*/
+    checkReference(reference: WagerTransaction): FailureCode | null {
+        if (this.providerId !== reference.providerId || this.playerId !== reference.playerId
+            || this.walletId !== reference.walletId || this.roundId !== reference.roundId
+            || this.money.currency !== reference.money.currency) {
+            return FailureCode.ReferenceMismatch;
+        }
+        if (!ALLOWED_REFERENCE_KINDS[this.kind].includes(reference.kind)) {
+            return FailureCode.InvalidReferenceKind;
+        }
+        if (this.requiresReference() && !this.money.equals(reference.money)) {
+            return FailureCode.ReversalAmountMismatch;
+        }
+        return null;
+    }
 }
