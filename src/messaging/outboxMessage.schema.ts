@@ -1,6 +1,6 @@
 import {EntitySchema} from "@mikro-orm/core";
 
-// Mirrors outbox_messages. No domain class, so rows are used directly (no mapper).
+// Mirrors outbox_messages. The publisher goes through OutboxMessage (outboxMessage.mapper.ts); enqueue still inserts rows directly.
 export class OutboxMessageRow {
     id!: string;               // the event id
     aggregateId!: string;
