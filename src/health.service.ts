@@ -1,16 +1,18 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { MikroORM } from '@mikro-orm/postgresql';
-import { ListQueuesCommand, SQSClient } from '@aws-sdk/client-sqs';
+import { GetQueueAttributesCommand, SQSClient } from '@aws-sdk/client-sqs';
+import { SQS_CLIENT } from './messaging/sqs.provider.js';
+import { MESSAGING_CONFIG, type MessagingConfig } from './messaging/messaging.config.js';
 
 const PROBE_TIMEOUT_MS = 2000;
 
 @Injectable()
 export class HealthService {
-  // endpoint/region/credentials come from AWS_* env vars (see docker-compose.yaml)
-  // ponytail: own client for now, extract a shared provider when the consumer needs one
-  private readonly sqs = new SQSClient({ maxAttempts: 1 });
-
-  constructor(private readonly orm: MikroORM) {}
+  constructor(
+    private readonly orm: MikroORM,
+    @Inject(SQS_CLIENT) private readonly sqs: SQSClient,
+    @Inject(MESSAGING_CONFIG) private readonly config: MessagingConfig,
+  ) {}
 
   getLive(): boolean {
     return true;
@@ -21,10 +23,15 @@ export class HealthService {
       this.probe(
         async () => !!(await this.orm.em.getConnection().execute('select 1')),
       ),
-      // reachability only; switch to GetQueueAttributes on wager-transactions.fifo once queues are provisioned
+      // fails when the queue is missing, not only when SQS is unreachable
       this.probe(
         async () =>
-          !!(await this.sqs.send(new ListQueuesCommand({ MaxResults: 1 }))),
+          !!(await this.sqs.send(
+            new GetQueueAttributesCommand({
+              QueueUrl: this.config.wagerQueueUrl,
+              AttributeNames: ['QueueArn'],
+            }),
+          )),
       ),
     ]);
     return { postgres, sqs };

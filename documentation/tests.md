@@ -5,7 +5,7 @@ Two vitest configs, one database. `bun` must be on PATH; if it is not, prefix th
 | Command | What runs | Needs |
 |---|---|---|
 | `bun run test` | unit specs: `src/**/*.spec.ts`, `test/unit/**` (domain, events, errors, domain purity) | nothing |
-| `bun run test:e2e` | `test/integration/**` and `test/e2e/**` against real Postgres | `docker compose up -d db` (Postgres on 5432) and `DATABASE_URL_TEST` in `.env` |
+| `bun run test:e2e` | `test/integration/**` and `test/e2e/**` against real Postgres and LocalStack | `docker compose up -d db localstack` (wait until LocalStack is `healthy`) and `DATABASE_URL_TEST`, `AWS_*` and the queue URLs in `.env` (see `.env.example`) |
 | `bunx vitest run --config ./vitest.config.experiments.ts` | `test/experiments/**`: the contention experiment (D1), prints a markdown table; **not** part of the suite | same as e2e |
 | `bunx tsc --noEmit`, `bunx oxlint src/ test/`, `bun run build` | types, lint, compile | nothing |
 
@@ -42,8 +42,13 @@ If one run differs, run the failing file alone 20 times (`for i in $(seq 20); do
 | 12, 14 | `test/integration/inbox.spec.ts` |
 | 13 | `test/integration/createWallet.spec.ts` |
 | 15 | `test/experiments/contention.spec.ts` |
+| outbox: claim, publisher (rollback, crash, two publishers, retry, timer) | `test/integration/outboxClaim.spec.ts`, `test/integration/outbox.spec.ts` |
+| SQS test helpers | `test/integration/sqsSupport.spec.ts` |
+| readiness reads the queue | `test/e2e/health.e2e-spec.ts` |
 
-Current state (2026-10-21): 291 unit, 91 integration and e2e, three green runs in a row.
+Current state (2026-10-21): 392 unit, 190 integration and e2e, three green runs in a row.
+
+The outbox tests create uniquely named throwaway queues with a 2 s visibility timeout (`test/support/sqs.ts`), never the compose queues, and `vitest.config.e2e.ts` sets `WORKERS_ENABLED=false` so booting the app in a test does not start the publisher timer.
 
 ## HTTP tests and Postman (phase 5)
 

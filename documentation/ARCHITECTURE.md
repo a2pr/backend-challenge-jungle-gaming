@@ -1,6 +1,6 @@
 # Architecture decisions
 
-Decisions taken so far, section numbers refer to `README.md`. Decision numbers (D1 to D18) follow `plan.md`; D1 to D11, D17 and D18 were taken on 2026-10-20 (phase 1) and D12 to D16 are taken in the phase that needs them. Infrastructure decisions (LocalStack pin, container user, readiness probes, lazy MikroORM connection) are in `progress-log.md` and will be moved here as each area is implemented.
+Decisions taken so far, section numbers refer to `README.md`. Decision numbers (D1 to D18) follow `plan.md`; D1 to D11, D17 and D18 were taken on 2026-10-20 (phase 1) and D12 (phase 6) and D13, D15 (phase 5) are taken; D14 and D16 are taken in the phase that needs them. Infrastructure decisions (LocalStack pin, container user, readiness probes, lazy MikroORM connection) are in `progress-log.md` and will be moved here as each area is implemented.
 
 ## Money value object [6.1, 5.1]
 
@@ -180,3 +180,21 @@ The guarantees live in the schema, not only in the code: `CHECK (balance >= 0)`,
 | D13 Validation | `zod` at the boundary, one `parse(schema, input)` helper that throws `BadRequestError` with the issues as `details`. Money stays a string end to end: the DTO checks the format (`^\d{1,16}\.\d{2}$`: scale 2 and exactly the `numeric(19,2)` range), `Money.from` converts at the edge, `toJSON()` converts back. The DTOs check **shape only**; the kind rules (BET > 0, a reversal needs a reference) stay in `WagerTransaction.create` and surface as 400 through `toHttp` | `class-validator` (decorators on DTO classes; a second place for rules the domain already owns). Repeating the kind rules in the DTO: two places to keep equal | The same schema style serves the SQS body in phase 7 |
 | D15 Auth (0 points) | A no-op `AuthGuard` class on the wallet and wagering controllers (`@UseGuards(AuthGuard)`); health stays public. A real guard (JWT / OIDC against Keycloak or Zitadel) replaces it with `{ provide: AuthGuard, useClass: ... }` and no controller changes | A string token (`@UseGuards` cannot inject one); building an identity provider flow, which the README says is not scored | **Limitation:** there is no authentication, so `playerId` and `providerId` are trusted as sent. The design with an IdP would take the provider from the token's subject and reject a body that names another provider |
 | Correlation | `x-correlation-id` is read (or generated), echoed in the response header and passed to the use case, so it reaches every event envelope | Generating it only inside the use case: the caller could not correlate its own logs | The filter logs it with the status and code of every 4xx and 5xx |
+
+## Outbox publisher [11, 6.5] (D12)
+
+| Decision | Choice | Rejected alternative and why | Consequence |
+|---|---|---|---|
+| D12 Event destination | A third queue, `wager-events` (standard). Queues are created by `localstack/init/ready.d/queues.sh` on `docker compose up` (idempotent), and the app waits for LocalStack's healthcheck | FIFO for events (ordering rules without more safety); creating queues from the app (a second place that owns infrastructure) | Duplicates reach the queue; consumers dedupe by `eventId`, which is in the message body and in a message attribute |
+| Claim strategy | One transaction: `SELECT ... WHERE published_at IS NULL AND next_attempt_at <= now ORDER BY next_attempt_at LIMIT 50 FOR UPDATE SKIP LOCKED`, send each message, `markPublished` or `scheduleRetry`, `save`, commit. Plain SQL through the transactional `EntityManager` | `NOWAIT` (raises on a locked row; a polling worker wants to move on); claim-then-publish with a lease column and a reaper (more states, a second failure mode) | Two publishers or instances take disjoint rows; no version column is needed on `save` because the claim holds the row lock |
+| Ordering | `ORDER BY next_attempt_at`, so a retrying row does not starve new ones | Strict per-aggregate order: not promised, and `SKIP LOCKED` cannot give it | Events of one wallet can arrive out of order after a retry; consumers must not depend on order |
+| Publish only in the worker | The use case only inserts outbox rows in its own transaction; the worker never runs before that commit | Publishing from the use case after commit (a crash between the two loses the event) | "Event published before commit" cannot happen: a rolled-back transaction leaves no row to claim |
+| Retry | `OutboxMessage.scheduleRetry` uses the phase 2 `backoffMs` (5 s base, 300 s cap); the SDK retries are off (`maxAttempts: 1`) so the attempt count is true. There is no terminal state: a row is retried until it is published | A `FAILED` outbox state: an event lost on purpose, which is never acceptable here | A permanently broken destination grows `attempts` forever; phase 9 should alert on high `attempts` |
+
+**The crash window.** A crash after `SendMessage` and before the commit leaves the row pending, so the next tick sends it again: one duplicate, never a loss. A crash after the commit of the financial transaction and before any tick is harmless: the row waits and another instance publishes it (both cases are in `outbox.spec.ts`).
+
+**Known limit: the SQS call runs while row locks are held.** Fine at this scale (50 rows per tick, one transaction). If SQS latency grows, a slow send holds up to 50 row locks and the connection. The alternative is claim-then-publish with a lease column and a reaper; not built.
+
+**Known limit: one tick at a time per process.** The timer skips a beat while the previous tick runs; across processes `SKIP LOCKED` does the separation. `tick` takes the clock as a parameter so tests do not sleep.
+
+**Readiness.** `/health/ready` calls `GetQueueAttributes` on `wager-transactions.fifo` through the shared `SQS_CLIENT`, so a missing queue turns it red. The events queue is not probed.

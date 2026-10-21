@@ -149,6 +149,33 @@ Open items for the next phases:
 - **Phase 7 (consumer):** the 503 mapping of `55P03` is done; the consumer must treat a lock timeout as retryable (leave the message on the queue).
 - **Housekeeping:** the per-step time was not recorded; the `db` container is named `localhost` (`container_name: ${DATABASE_HOST}`), which works but confuses; a repeated query parameter (`?limit=1&limit=2`) is a 400 by accident of the schema, not by a test.
 
+## Phase 6: outbox publisher (done 2026-10-21)
+
+State: `bun run test` 392 passed, `bun run test:e2e` 190 passed (three runs in a row), `tsc`, `nest build` and lint clean.
+
+| Step | State | Detail |
+|---|---|---|
+| 0 Queues and support | done | `localstack/init/ready.d/queues.sh` (idempotent, `MAX_RECEIVE=5`), LocalStack healthcheck and `service_healthy` for `nest-app`, `messaging.config.ts`, `SQS_CLIENT` provider, `test/support/sqs.ts` |
+| 1 `OutboxMessage` | done | domain class (`enqueue`, `rehydrate`, `markPublished`, `scheduleRetry`, 5 s base / 300 s cap) and mapper; `domainPurity` now covers `src/messaging` |
+| 2 `claimDue` and `save` | done | `FOR UPDATE SKIP LOCKED` in plain SQL inside the transaction; `outboxClaim.spec.ts` |
+| 3 `OutboxPublisher` | done | `tick(now)` plus timer with in-flight guard, `WORKERS_ENABLED` switch, shutdown awaits the tick |
+| 4 Integration tests | done | `outbox.spec.ts`: happy path, rollback, crash before and after the send, two publishers over 100 rows, retry by backoff, one bad message in 5, timer on and off |
+| 5 Health | done | `HealthService` uses `SQS_CLIENT` and `GetQueueAttributes` on the main queue; `health.e2e-spec.ts` (503 when the queue is missing, 200 once it exists) |
+
+Bugs found on the way:
+
+- Raw `execute()` skips MikroORM hydration: `timestamptz` came back as a string (`'2026-10-21 12:00:00+00'`), not a `Date`, and columns were snake_case. `claimDue` aliases the columns to the row properties and converts the three dates before the mapper. Found by the first claim spec run.
+- LocalStack returns queue URLs on `sqs.us-east-1.localhost.localstack.cloud`, which needs public DNS; one run failed with `ENOTFOUND`. The client sets `useQueueUrlAsEndpoint: false` so it always uses the configured endpoint.
+- The e2e app boot would have started the real publisher timer against the dev queues; `vitest.config.e2e.ts` sets `WORKERS_ENABLED=false`.
+
+Decisions (details in `ARCHITECTURE.md`, "Outbox publisher"): D12 as planned (third queue `wager-events`, standard); claim and send in one transaction.
+
+Open items for the next phases:
+
+- **Phase 7 (consumer):** `sendWagerMessage` in `test/support/sqs.ts`; the app config of `maxReceiveCount` must equal `MAX_RECEIVE` in `queues.sh`; consumers of `wager-events` dedupe by `eventId`.
+- **Phase 9:** published and failed counters from `tick`'s result; a stuck-row alert (`attempts` high).
+- **Housekeeping:** an `Error: connection terminated unexpectedly` line is printed by one existing e2e spec on every run (the run still passes); not investigated.
+
 ## WagerTransaction stubs: decisions deferred (superseded)
 
 **Superseded 2026-10-20:** every point below was decided (D1 to D11, D17, D18) and is written in `ARCHITECTURE.md` and `plan.md`. Kept only as history; delete when convenient. Original text:
@@ -167,8 +194,6 @@ Stubs exist only so `tsc` passes. Props types (`CreateWagerTransactionProps`, `W
 ## Known issues and risks
 
 - `src/app.service.ts` and its spec disagree; `bun run test` fails.
-- `health.service.ts` creates its own `SQSClient`. Move to a shared provider when the consumer is added.
-- SQS probe checks reachability only; it will not notice a missing queue. Switch to `GetQueueAttributes` once queues exist.
 - `.env` holds the DB password and is used by Compose. It is git-ignored; there is no `.env.example` for reviewers yet.
 - `DATABASE_URL` ends in `?schema=public` (Prisma style). Ignored by the driver; set `schema` in the MikroORM config if a non-default schema is wanted.
 - No `healthcheck`/`condition: service_healthy` in Compose, so the app can start before Postgres accepts connections. Readiness covers this at runtime, but the first MikroORM query may race at boot.

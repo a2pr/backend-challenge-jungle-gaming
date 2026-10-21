@@ -19,3 +19,6 @@ All this file will live at documentation folder
 
 ## Taxonomy 
 This project will use postman collections to keep track on all request that can be sent an received also save in documentation folder.
+
+## git
+Git commands are run by humans, unless approved do not run commits or push to origin by any means.
