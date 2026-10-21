@@ -17,7 +17,7 @@ import WalletLedgerEntry, {LedgerDirection} from "../wallet/walletLedgerEntry.js
 import {IntegrationEvent} from "../events/integrationEvent.js";
 import {randomUUID} from "node:crypto";
 import {InsufficientFundsError} from "../wallet/errors.js";
-import {WalletNotFoundError} from "./errors.js";
+import {DuplicateExternalTransactionError, IdempotencyConflictError, WalletNotFoundError} from "./errors.js";
 import {WalletBalanceChanged} from "../events/walletBalanceChanged.js";
 import {WagerTransactionProcessed} from "../events/wagerTransactionProcessed.js";
 import {WagerTransactionRejected} from "../events/wagerTransactionRejected.js";
@@ -100,6 +100,29 @@ export class SubmitWagerTransactionUseCase {
 
         // A bad request throws here, before any write.
         const wager = this.buildTransaction(command, transactionId, now)
+
+        // step 5
+        const byKey = await this.wagerTransactionRepo.findByIdempotencyKey(tx, wager.providerId, wager.idempotencyKey)
+        if (byKey) {
+            if (!byKey.transaction.matchesPayload(wager.payloadHash)) {
+                throw new IdempotencyConflictError(wager.providerId, wager.idempotencyKey)
+            }
+            // every insert writes balanceAfter, so null is a bug, not a request error
+            if (byKey.balanceAfter === null) throw new Error(`Transaction ${byKey.transaction.id} has no balanceAfter`)
+            return this.toResult(byKey.transaction, Money.from({
+                amount: byKey.balanceAfter,
+                currency: byKey.transaction.money.currency
+            }), true)
+        }
+        const byExternal = await this.wagerTransactionRepo.findByExternalId(
+            tx,
+            wager.providerId,
+            wager.externalTransactionId
+        )
+        if(byExternal){
+            throw new DuplicateExternalTransactionError(wager.providerId,wager.externalTransactionId)
+        }
+
 
         let entry: WalletLedgerEntry | undefined
         const walletFailure = this.checkWallet(wallet, wager)

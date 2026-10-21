@@ -11,8 +11,9 @@ import {WalletLedgerRepository} from '../../src/wallet/walletLedger.repository.j
 import {OutboxRepository} from '../../src/messaging/outbox.repository.js';
 import {InboxRepository} from '../../src/messaging/inbox.repository.js';
 import {WagerTransactionKind} from '../../src/wager/wagerTransactionKind.js';
-import {WalletNotFoundError} from '../../src/wager/errors.js';
-import {InvalidWagerTransactionError} from '../../src/wager/errors.js';
+import {
+    DuplicateExternalTransactionError, IdempotencyConflictError, InvalidWagerTransactionError, WalletNotFoundError,
+} from '../../src/wager/errors.js';
 import Money from '../../src/money/money.js';
 
 let orm: MikroORM;
@@ -98,5 +99,84 @@ describe('SubmitWagerTransaction: simple kinds', () => {
 
         expect(await count('wager_transactions')).toBe(before);
         expect(await balanceOf(walletId)).toBe('100.00');
+    });
+});
+
+describe('SubmitWagerTransaction: idempotency', () => {
+    const txRows = (walletId: string) => count(`wager_transactions WHERE wallet_id = '${walletId}' AND kind = 'BET'`);
+
+    it('2. the same BET sent 50 times in parallel debits once: 1 original, 49 replays', async () => {
+        const {walletId, playerId} = await openWallet(orm, '100.00');
+        const cmd = betCommand({walletId, playerId, money: brl('10.00')});
+
+        const results = await runInParallel(50, () => submit.execute(cmd));
+
+        expect(results.filter((r) => !r.idempotentReplay)).toHaveLength(1);
+        expect(results.filter((r) => r.idempotentReplay)).toHaveLength(49);
+        expect(new Set(results.map((r) => r.transactionId)).size).toBe(1);
+        expect(await txRows(walletId)).toBe(1);
+        expect(await debits(walletId)).toBe(1);
+        expect(await balanceOf(walletId)).toBe('90.00');
+        await assertLedgerMatchesBalance(orm, walletId);
+    });
+
+    it('3. a replay returns the original balance, not the current one, and writes nothing', async () => {
+        const {walletId, playerId} = await openWallet(orm, '100.00');
+        const cmd = betCommand({walletId, playerId, money: brl('10.00')});
+        const first = await submit.execute(cmd);
+        await submit.execute(betCommand({walletId, playerId, money: brl('30.00')}));
+        const outboxBefore = await count('outbox_messages');
+
+        const replay = await submit.execute(cmd);
+
+        expect(replay).toEqual({...first, idempotentReplay: true});
+        expect(replay.balance.amount).toBe('90.00');
+        expect(await balanceOf(walletId)).toBe('60.00');
+        expect(await count('outbox_messages')).toBe(outboxBefore);
+        await assertLedgerMatchesBalance(orm, walletId);
+    });
+
+    it('3b. a replay of a rejected transaction returns the same rejection', async () => {
+        const {walletId, playerId} = await openWallet(orm, '10.00');
+        const cmd = betCommand({walletId, playerId, money: brl('50.00')});
+        const first = await submit.execute(cmd);
+
+        const replay = await submit.execute(cmd);
+
+        expect(first).toMatchObject({status: 'REJECTED', failureCode: 'INSUFFICIENT_FUNDS'});
+        expect(replay).toEqual({...first, idempotentReplay: true});
+        expect(await txRows(walletId)).toBe(1);
+    });
+
+    it('4. the same key with another amount or another wallet throws IdempotencyConflictError and moves nothing', async () => {
+        const {walletId, playerId} = await openWallet(orm, '100.00');
+        const other = await openWallet(orm, '100.00');
+        const cmd = betCommand({walletId, playerId, money: brl('10.00')});
+        await submit.execute(cmd);
+        const rowsBefore = await count('wager_transactions');
+
+        await expect(submit.execute({...cmd, money: brl('20.00')})).rejects.toBeInstanceOf(IdempotencyConflictError);
+        await expect(submit.execute({...cmd, walletId: other.walletId, playerId: other.playerId}))
+            .rejects.toBeInstanceOf(IdempotencyConflictError);
+
+        expect(await count('wager_transactions')).toBe(rowsBefore);
+        expect(await balanceOf(walletId)).toBe('90.00');
+        expect(await balanceOf(other.walletId)).toBe('100.00');
+        await assertLedgerMatchesBalance(orm, walletId);
+        await assertLedgerMatchesBalance(orm, other.walletId);
+    });
+
+    it('5. the same externalTransactionId under another key throws DuplicateExternalTransactionError', async () => {
+        const {walletId, playerId} = await openWallet(orm, '100.00');
+        const first = betCommand({walletId, playerId});
+        await submit.execute(first);
+        const rowsBefore = await count('wager_transactions');
+
+        await expect(submit.execute(betCommand({walletId, playerId, externalTransactionId: first.externalTransactionId})))
+            .rejects.toBeInstanceOf(DuplicateExternalTransactionError);
+
+        expect(await count('wager_transactions')).toBe(rowsBefore);
+        expect(await balanceOf(walletId)).toBe('90.00');
+        await assertLedgerMatchesBalance(orm, walletId);
     });
 });
