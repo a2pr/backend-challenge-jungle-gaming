@@ -118,6 +118,37 @@ Open items for the next phases:
 - **Phase 7 (consumer):** build `ctx.inbox` from the SQS message, ack on `duplicate-message`, `reprocess`, `findDuePendingReference`, end a pending reference as `REFERENCE_NOT_FOUND` after the retry limit (`markPendingReference` throws at the limit, so the worker must call `reject` first), `FAILED` rows and the DLQ.
 - **Housekeeping:** `SubmitWagerTransaction.usecase.ts` casing (cosmetic); time per step was not recorded (start in phase 5).
 
+## Phase 5: HTTP API and Postman (done 2026-10-21)
+
+State: `bun run test` 383 passed, `bun run test:e2e` 175 passed (three runs in a row), `tsc`, `nest build` and lint clean. Postman: 34 requests, 67 assertions, green twice on the same database.
+
+| Step | State | Detail |
+|---|---|---|
+| 0 HTTP test support | done | `test/support/app.ts` (`createTestApp(customize?)`), `zod`, `supertest` |
+| 1 Errors to HTTP | done | `toHttp`, `DomainExceptionFilter`, `parse`, `BadRequestError`, `AuthGuard`, `configureApp` (shared by `main.ts` and the tests); `toHttp.spec.ts` |
+| 2 Wallet endpoints | done | `POST /wallets` (201), `GET /wallets/:id`; money and create-wallet DTOs; `WalletRepository.findById`; `wallets.e2e-spec.ts` |
+| 3 `POST /wagering/transactions` | done | DTO + `toCommand`, `toResponse`, `WageringController`; the cross-wallet same-key race handled by one retry in `execute`; `wagering.e2e-spec.ts` (31 cases) |
+| 4 Transaction reads | done | `GET /wagering/transactions/:id`, `GET /providers/:p/wagering/transactions/:ext`; `WagerTransactionRepository.findById`, `toStoredBody` |
+| 5 Ledger pagination | done | `cursor.ts`, `WalletLedgerRepository.page`; 120 entries as 50/50/20, an entry between pages |
+| 6 Reconciliation | done | `WalletLedgerRepository.reconcile` (one statement), error log on a mismatch, no repair |
+| 7 Postman | done | `documentation/postman_collection.json` and `postman_environment.json`, linked from `tests.md` |
+| 8 Close out | done | gates, `ARCHITECTURE.md` (D9 implemented, D13, D15, cursor, reconciliation, race), this log, `plan.md` |
+
+Bugs found on the way:
+
+- `player_id` is a `uuid` column but the DTO accepted any string: a non-UUID `playerId` reached Postgres and came back as a retryable 503. `playerId` is `z.uuid()` now (first wagering e2e run).
+- The global filter replaced the readiness probe's 503 body (`{postgres, sqs}`) with a generic one, hiding which dependency was down. `HttpException` bodies are kept as `details` (found when `/health/ready` failed in Compose).
+- `seq::text AS seq` made `ORDER BY seq` sort as text: pages of a long ledger repeated rows. Found by the balance-chain assertion of the 120-entry test, not by the 3-row repository test.
+- Compose passed `DATABASE_URL` from `.env` (host `localhost`), which inside the container is the container itself: every request failed with `ECONNREFUSED`. `docker-compose.yaml` now builds the URL for `nest-app` with host `db`. A fresh database also needs `docker compose exec nest-app bun run migration:up` (until then every wallet request is 503).
+
+Decisions (details in `ARCHITECTURE.md`): D9 implemented with two mapping functions; D13 zod, shape only; D15 `AuthGuard` class; cross-wallet same-key race handled by one retry; ledger cursor is `seq`; reconciliation is one statement.
+
+Open items for the next phases:
+
+- **Phase 6 (outbox):** `claimDue` with `FOR UPDATE SKIP LOCKED`, publisher, retries, queue provisioning. The reconciliation mismatch hook (phase 9) is marked in `wallet.controller.ts`.
+- **Phase 7 (consumer):** the 503 mapping of `55P03` is done; the consumer must treat a lock timeout as retryable (leave the message on the queue).
+- **Housekeeping:** the per-step time was not recorded; the `db` container is named `localhost` (`container_name: ${DATABASE_HOST}`), which works but confuses; a repeated query parameter (`?limit=1&limit=2`) is a 400 by accident of the schema, not by a test.
+
 ## WagerTransaction stubs: decisions deferred (superseded)
 
 **Superseded 2026-10-20:** every point below was decided (D1 to D11, D17, D18) and is written in `ARCHITECTURE.md` and `plan.md`. Kept only as history; delete when convenient. Original text:
@@ -143,7 +174,7 @@ Stubs exist only so `tsc` passes. Props types (`CreateWagerTransactionProps`, `W
 - No `healthcheck`/`condition: service_healthy` in Compose, so the app can start before Postgres accepts connections. Readiness covers this at runtime, but the first MikroORM query may race at boot.
 - `Money` throws plain `Error`s (distinct messages, no typed classes). Add `InvalidMoneyError` / `CurrencyMismatchError` before the HTTP layer so a filter can map to 422. Tests only assert `toThrow()`.
 - `Money.equals` throws on currency mismatch (decision recorded in `ARCHITECTURE.md`). Revisit if a caller needs a non-throwing comparison.
-- `Money.from` accepts negatives; rejecting them in input contracts is the request DTO's job and is not written yet.
+- `Money.from` accepts negatives (the domain needs them for signed differences); the request DTOs reject them (phase 5, `money.dto.ts`).
 - `Money` persistence mapping is settled (D10: `numeric(19,2)` + `char(3)`, mapper functions, proven by the phase 3 round-trip spec).
 - `tests.md` and the coverage target for the 80% goal are untracked.
 

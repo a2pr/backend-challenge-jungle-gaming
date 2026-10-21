@@ -102,6 +102,13 @@ Rule: **status codes describe the request, not the stored state.** The outcome m
 | `PROCESSED`, replays included | 200 (`POST /wallets`: 201) | yes |
 | Transient infrastructure failure | 503 with `Retry-After: 1` | no, safe to resend the same request |
 
+**Implemented (phase 5).** Two functions hold the whole mapping, so no controller chooses a status:
+
+- `toHttp(error)` (`src/http/toHttp.ts`) maps thrown errors, by `instanceof`, to `{status, code, message, retryable, headers?, details?}`. `BadRequestError`, `InvalidMoneyError`, `CurrencyMismatchError`, `InvalidWagerTransactionError`, `InvalidMovementError` are 400 `VALIDATION_ERROR` (zod issues in `details`); `WalletNotFoundError` and `TransactionNotFoundError` 404; `IdempotencyConflictError`, `DuplicateExternalTransactionError`, `DuplicateWalletError` 409 with their own codes; `InvalidTransactionStateError` 500 `INVALID_STATE` (a bug); Nest's `HttpException` keeps its status (unknown route, malformed JSON, the readiness probe's 503 with its checks as `details`); Postgres `55P03` (lock timeout, also read through `cause`), connection loss and any other `Error` are 503 `TEMPORARILY_UNAVAILABLE` with `Retry-After: 1` and `retryable: true`; a non-`Error` throw is 500. The message of a 5xx is never sent (a connection error can carry a host or a credential); the filter logs the real error.
+- `toResponse(result)` (`src/http/transactionResponse.ts`) maps the *outcome* of `POST /wagering/transactions`: `PROCESSED` 200, `PENDING_REFERENCE` 202, `REJECTED` 422, `FAILED` 409. A business rejection is a response, not an exception. The GETs use `toStoredBody` and always answer 200.
+
+Every `uuid` column is validated as `z.uuid()` at the boundary (wallet id, player id, transaction id in a path): without it Postgres raises `invalid input syntax for type uuid`, which would surface as a misleading retryable 503 (found by the first wagering e2e run).
+
 Rejected alternative: 200 with `status: REJECTED` in the body (common in wallet APIs, but the provider has to parse the body to tell a rejection from a success, which the README asks to avoid), and applying the POST mapping to GETs (a successful read answering 422 breaks caching and tooling).
 
 ## Persistence [4, 5.9, 6.0] (D10, D11, D17)
@@ -165,3 +172,11 @@ The guarantees live in the schema, not only in the code: `CHECK (balance >= 0)`,
 | Rule 4 | Stricter than the literal text | D5 |
 
 **Known limit: no jitter in backoff.** `backoffMs` is deterministic (`min(base * 2^n, cap)`), so many identical failures retry at the same instant. Not a concern at this scale; add random jitter in the caller if it becomes one.
+
+## HTTP layer: validation and auth [9, 2] (D13, D15)
+
+| Decision | Choice | Rejected alternative and why | Consequence |
+|---|---|---|---|
+| D13 Validation | `zod` at the boundary, one `parse(schema, input)` helper that throws `BadRequestError` with the issues as `details`. Money stays a string end to end: the DTO checks the format (`^\d{1,16}\.\d{2}$`: scale 2 and exactly the `numeric(19,2)` range), `Money.from` converts at the edge, `toJSON()` converts back. The DTOs check **shape only**; the kind rules (BET > 0, a reversal needs a reference) stay in `WagerTransaction.create` and surface as 400 through `toHttp` | `class-validator` (decorators on DTO classes; a second place for rules the domain already owns). Repeating the kind rules in the DTO: two places to keep equal | The same schema style serves the SQS body in phase 7 |
+| D15 Auth (0 points) | A no-op `AuthGuard` class on the wallet and wagering controllers (`@UseGuards(AuthGuard)`); health stays public. A real guard (JWT / OIDC against Keycloak or Zitadel) replaces it with `{ provide: AuthGuard, useClass: ... }` and no controller changes | A string token (`@UseGuards` cannot inject one); building an identity provider flow, which the README says is not scored | **Limitation:** there is no authentication, so `playerId` and `providerId` are trusted as sent. The design with an IdP would take the provider from the token's subject and reject a body that names another provider |
+| Correlation | `x-correlation-id` is read (or generated), echoed in the response header and passed to the use case, so it reaches every event envelope | Generating it only inside the use case: the caller could not correlate its own logs | The filter logs it with the status and code of every 4xx and 5xx |
