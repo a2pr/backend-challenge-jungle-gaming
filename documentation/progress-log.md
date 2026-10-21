@@ -60,7 +60,29 @@ Bugs the new spec found in the first run, now fixed: `create` stored `now` as `p
 
 Optional leftovers, none blocks phase 3: `from` / `to` as fields on `InvalidTransactionStateError` (phase 5 filter may want them); `ROLLBACKABLE` duplicates `ALLOWED_REFERENCE_KINDS[Rollback]`; the commented-out block at the bottom of `wagerTransaction.ts`; `money.ts` line 23 (`amount.lt(0)`) is only reachable with a `-` amount and has no test; the final negative check in `create` (line ~215) is not covered.
 
-Next: Phase 3 (schema and migration).
+Next: Phase 4 (use cases).
+
+## Phase 3: schema and migration (done 2026-10-21)
+
+State: `test/integration` 27 passed (`schema.spec.ts` 21, `mappers.spec.ts` 6) against the real Postgres `nest_test` database; `bun run test` 280 passed; `bun run test:e2e` 29 passed (integration plus the 2 health e2e); `tsc`, `nest build` and `oxlint` clean.
+
+| Item | State | Detail |
+|---|---|---|
+| Migration | done | `src/migrations/Migration20261021104500_initial.ts`: five tables, partial indexes, append-only trigger, `down()` in reverse order |
+| Config | done | `Migrator` extension, migrations path, pool from `DATABASE_POOL_MAX`; entities listed explicitly (see `ARCHITECTURE.md`) |
+| Schemas | done | wallet, wager transaction, ledger entry, inbox, outbox |
+| Mappers | done | wallet, wager transaction (`extras.balanceAfter`), ledger entry |
+| Runner | done | `src/migrate.ts`, `bun run migration:up|down|status` |
+| Test support | done | `test/support/db.ts`: `createOrm`, `resetSchema`, `truncateAll` |
+| Constraint tests | done | negative balance, duplicate wallet / external id / idempotency key, `REFUND` without and `BET` with a reference, `REJECTED` without a failure code, `PROCESSED` without `processed_at`, amount rules, ledger balance and amount, one ledger row per transaction, ledger `UPDATE` / `DELETE`, one `PROCESSED` reversal per reference (a `REJECTED` second one allowed), `TRUNCATE` still allowed |
+| Round trips | done | `0.10` stays `"0.10"`; nullable columns map to `undefined`; `balanceAfter` only written when given |
+| Docs | done | `ARCHITECTURE.md` schema notes, `deployment.md` migration section |
+
+Found on the way: the migration had no `down()`; the wager schema had a copy-paste `game_id` mapped to `provider_id`, `money` instead of `amount` and `currency`, `provider_id` typed as uuid, and no nullable columns; the `*.schema.ts` glob broke the e2e boot; `node dist/migrate.js` could not see `.env`, fixed by running the scripts under bun.
+
+Open: `seq` is not mapped yet (phase 5 pagination). `deployment.md` migration commands were run from the host with bun, not yet through `docker compose exec`. No database test covers concurrent writers; that is phase 4 (test 15) and phase 8.
+
+Next: Phase 4 (use cases).
 
 ## WagerTransaction stubs: decisions deferred (superseded)
 
@@ -88,7 +110,7 @@ Stubs exist only so `tsc` passes. Props types (`CreateWagerTransactionProps`, `W
 - `Money` throws plain `Error`s (distinct messages, no typed classes). Add `InvalidMoneyError` / `CurrencyMismatchError` before the HTTP layer so a filter can map to 422. Tests only assert `toThrow()`.
 - `Money.equals` throws on currency mismatch (decision recorded in `ARCHITECTURE.md`). Revisit if a caller needs a non-throwing comparison.
 - `Money.from` accepts negatives; rejecting them in input contracts is the request DTO's job and is not written yet.
-- `Money` persistence mapping (`numeric(19,2)` + `char(3)` vs cents) is undecided; settle it with the Wallet schema.
+- `Money` persistence mapping is settled (D10: `numeric(19,2)` + `char(3)`, mapper functions, proven by the phase 3 round-trip spec).
 - `tests.md` and the coverage target for the 80% goal are untracked.
 
 ## Suggested next steps (smallest path to the scoring weight)
