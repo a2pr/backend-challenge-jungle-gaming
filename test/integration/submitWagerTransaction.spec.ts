@@ -3,8 +3,8 @@ import {randomUUID} from 'node:crypto';
 import {MikroORM} from '@mikro-orm/postgresql';
 import {createOrm, resetSchema, truncateAll} from '../support/db.js';
 import {assertLedgerMatchesBalance} from '../support/ledger.js';
-import {betCommand, brl, openWallet, runInParallel} from '../support/fixtures.js';
-import {SubmitWagerTransactionUseCase} from '../../src/wager/SubmitWagerTransaction.usecase.js';
+import {betCommand, brl, completed, openWallet, runInParallel} from '../support/fixtures.js';
+import {SubmitWagerCommand, SubmitWagerTransactionUseCase, WagerResult} from '../../src/wager/SubmitWagerTransaction.usecase.js';
 import {WalletRepository} from '../../src/wallet/wallet.repository.js';
 import {WagerTransactionRepository} from '../../src/wager/wagerTrasanction.repository.js';
 import {WalletLedgerRepository} from '../../src/wallet/walletLedger.repository.js';
@@ -17,7 +17,8 @@ import {
 import Money from '../../src/money/money.js';
 
 let orm: MikroORM;
-let submit: SubmitWagerTransactionUseCase;
+// These specs never pass an inbox, so every call completes; narrow once here.
+let submit: { execute(command: SubmitWagerCommand): Promise<WagerResult> };
 
 const rows = (sql: string, params: unknown[] = []) => orm.em.getConnection().execute(sql, params);
 const count = async (table: string) => Number((await rows(`SELECT COUNT(*)::int AS n FROM ${table}`))[0].n);
@@ -29,8 +30,9 @@ beforeAll(async () => {
     orm = await createOrm();
     await resetSchema(orm);
     await orm.migrator.up();
-    submit = new SubmitWagerTransactionUseCase(orm, new WalletRepository(), new WagerTransactionRepository(),
+    const useCase = new SubmitWagerTransactionUseCase(orm, new WalletRepository(), new WagerTransactionRepository(),
         new WalletLedgerRepository(), new OutboxRepository(), new InboxRepository());
+    submit = {execute: async (command) => completed(await useCase.execute(command))};
 });
 afterAll(() => orm.close());
 beforeEach(() => truncateAll(orm));

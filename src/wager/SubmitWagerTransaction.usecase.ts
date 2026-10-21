@@ -29,6 +29,8 @@ type ReferenceOutcome =
     | { kind: 'rejected'; code: FailureCode }
     | { kind: 'found'; reference: WagerTransaction };  // PROCESSED and consistent
 
+export type SubmitWagerOutcome = WagerResult | { kind: 'duplicate-message' }
+
 export interface SubmitWagerCommand {
     providerId: string;
     externalTransactionId: string;
@@ -45,6 +47,7 @@ export interface SubmitWagerCommand {
 export interface SubmitWagerContext {
     correlationId?: string;
     causationId?: string
+    inbox?: { consumerName: string; messageId: string; payloadHash: string }
 }
 
 export interface WagerResult {
@@ -62,6 +65,7 @@ interface RunInput {
     transactionId: string;
     correlationId: string;
     causationId: string | undefined;
+    inbox: SubmitWagerContext['inbox'];
     now: Date;
 }
 
@@ -80,7 +84,7 @@ export class SubmitWagerTransactionUseCase {
     ) {
     }
 
-    async execute(command: SubmitWagerCommand, ctx?: SubmitWagerContext): Promise<WagerResult> {
+    async execute(command: SubmitWagerCommand, ctx?: SubmitWagerContext): Promise<SubmitWagerOutcome> {
         let now = new Date()
         let transactionId = randomUUID()
         let correlationId = ctx?.correlationId ?? randomUUID()
@@ -91,11 +95,22 @@ export class SubmitWagerTransactionUseCase {
             transactionId,
             correlationId,
             causationId: ctx?.causationId,
+            inbox: ctx?.inbox,
             now
         }))
     }
 
-    private async run(tx: EntityManager, input: RunInput): Promise<WagerResult> {
+    private async run(tx: EntityManager, input: RunInput): Promise<SubmitWagerOutcome> {
+        const inbox = input.inbox
+        if (inbox && !(await this.inboxRepo.tryInsert(tx, {...inbox, receivedAt: input.now}))) {
+            return {kind: 'duplicate-message'}        // already committed by an earlier delivery: the consumer acks it
+        }
+        const result = await this.process(tx, input)
+        if (inbox) await this.inboxRepo.markProcessed(tx, inbox.consumerName, inbox.messageId, input.now)
+        return result
+    }
+
+    private async process(tx: EntityManager, input: RunInput): Promise<SubmitWagerOutcome> {
         const {command, transactionId, correlationId, causationId, now} = input
         // Raw SQL: pass the transaction context or it runs on another connection.
         await tx.getConnection().execute(`SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'`, [], 'run', tx.getTransactionContext())

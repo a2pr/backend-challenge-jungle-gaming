@@ -2,8 +2,8 @@ import {afterAll, beforeAll, beforeEach, describe, expect, it} from 'vitest';
 import {MikroORM} from '@mikro-orm/postgresql';
 import {createOrm, resetSchema, truncateAll} from '../support/db.js';
 import {assertLedgerMatchesBalance} from '../support/ledger.js';
-import {betCommand, brl, openWallet, runInParallel} from '../support/fixtures.js';
-import {SubmitWagerCommand, SubmitWagerTransactionUseCase} from '../../src/wager/SubmitWagerTransaction.usecase.js';
+import {betCommand, brl, completed, openWallet, runInParallel} from '../support/fixtures.js';
+import {SubmitWagerCommand, SubmitWagerTransactionUseCase, WagerResult} from '../../src/wager/SubmitWagerTransaction.usecase.js';
 import {WalletRepository} from '../../src/wallet/wallet.repository.js';
 import {WagerTransactionRepository} from '../../src/wager/wagerTrasanction.repository.js';
 import {WalletLedgerRepository} from '../../src/wallet/walletLedger.repository.js';
@@ -12,7 +12,8 @@ import {InboxRepository} from '../../src/messaging/inbox.repository.js';
 import {WagerTransactionKind as Kind} from '../../src/wager/wagerTransactionKind.js';
 
 let orm: MikroORM;
-let submit: SubmitWagerTransactionUseCase;
+// These specs never pass an inbox, so every call completes; narrow once here.
+let submit: { execute(command: SubmitWagerCommand): Promise<WagerResult> };
 
 const rows = (sql: string, params: unknown[] = []) => orm.em.getConnection().execute(sql, params);
 const balanceOf = async (walletId: string) => (await rows('SELECT balance::text AS b FROM wallets WHERE id = ?', [walletId]))[0].b;
@@ -35,8 +36,9 @@ beforeAll(async () => {
     orm = await createOrm();
     await resetSchema(orm);
     await orm.migrator.up();
-    submit = new SubmitWagerTransactionUseCase(orm, new WalletRepository(), new WagerTransactionRepository(),
+    const useCase = new SubmitWagerTransactionUseCase(orm, new WalletRepository(), new WagerTransactionRepository(),
         new WalletLedgerRepository(), new OutboxRepository(), new InboxRepository());
+    submit = {execute: async (command) => completed(await useCase.execute(command))};
 });
 afterAll(() => orm.close());
 beforeEach(() => truncateAll(orm));

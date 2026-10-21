@@ -84,9 +84,9 @@ Open: `seq` is not mapped yet (phase 5 pagination). `deployment.md` migration co
 
 Next: Phase 4 (use cases).
 
-## Phase 4: use cases (in progress, steps 0 to 6 done, 2026-10-21)
+## Phase 4: use cases (in progress, steps 0 to 7 done, 2026-10-21)
 
-State: `bun run test` 291 passed, `bun run test:e2e` 79 passed (16 repositories, 5 createWallet, 10 submitWagerTransaction, 13 references, schema, mappers, support, 2 health e2e), `tsc`, `nest build` and lint clean.
+State: `bun run test` 291 passed, `bun run test:e2e` 88 passed (16 repositories, 5 createWallet, 10 submitWagerTransaction, 13 references, 9 inbox, schema, mappers, support, 2 health e2e), `tsc`, `nest build` and lint clean.
 
 | Step | State | Detail |
 |---|---|---|
@@ -97,6 +97,9 @@ State: `bun run test` 291 passed, `bun run test:e2e` 79 passed (16 repositories,
 | 4 `SubmitWagerTransaction`, simple kinds | done | `run` (lock, build, wallet checks, apply, events, persist), `apply` free of I/O for the phase 7 reuse; tests 1 (the 80.00 race, three runs), 6 without references, 9b, unknown wallet, blank `roundId` |
 | 5 Idempotency | done | key lookup (replay with stored `balanceAfter`, `IdempotencyConflictError`), external id lookup (`DuplicateExternalTransactionError`); tests 2 (50 parallel, 1 original and 49 replays), 3, 3b, 4, 5. Review added the missing null `balanceAfter` guard (`tsc` failed) |
 | 6 References and reversals | done | `resolveReference` (pending / rejected / found, `checkReference`, `findReversalOf`) and the branch in `run`; `references.spec.ts`: tests 6, 6b, 7, 7b, 7c, 8, 8b, 9 |
+| 7 Inbox and atomicity | done | `run` wraps `process`: `tryInsert` first, `markProcessed` last, same transaction; `execute` returns `SubmitWagerOutcome` (`completed` or `duplicate-message`); tests 12a to 12c, 14a to 14f |
+
+Bugs found on the way (step 7): `RunInput` lacked `inbox` and `execute` never passed `ctx.inbox` on, so the inbox was dead code (and `tsc` failed). Fixed in review, covered by 14a.
 
 Bugs found on the way (step 6): the first `resolveReference` never returned its computed outcome, so every reversal was applied whatever the reference status (a refund of a rejected bet credited the wallet). Caught in review, fixed, covered by tests 7 and 7b. Lesson: an implicit-`any` local assigned in a `switch` compiles even when nothing reads it.
 
@@ -104,7 +107,7 @@ Bugs found on the way: raw SQL through `em.getConnection().execute(sql, params)`
 
 Decisions (details in `ARCHITECTURE.md`, "Use case wiring"): two modules, no `WagerModule`; unique violation translated after the rollback; wager finders return `balanceAfter`.
 
-Open: `src/wager/wagerTrasanction.repository.ts` has a typo in its name (rename to `wagerTransaction.repository.ts`); the `5s` lock timeout is a guess until step 9; the submit use case file is `SubmitWagerTransaction.usecase.ts` (capital S). Next: step 7 (inbox and atomicity). Also open: unique-violation retry for the cross-wallet same-key race (decision documented, not implemented).
+Open: `src/wager/wagerTrasanction.repository.ts` has a typo in its name (rename to `wagerTransaction.repository.ts`); the `5s` lock timeout is a guess until step 9; the submit use case file is `SubmitWagerTransaction.usecase.ts` (capital S). Next: step 8 (concurrency suite). Also open: unique-violation retry for the cross-wallet same-key race (decision documented, not implemented).
 
 ## WagerTransaction stubs: decisions deferred (superseded)
 

@@ -4,7 +4,7 @@ import Money from '../../src/money/money.js';
 import Wallet from '../../src/wallet/wallet.js';
 import WagerTransaction from '../../src/wager/wagerTransaction.js';
 import {WagerTransactionKind} from '../../src/wager/wagerTransactionKind.js';
-import type {SubmitWagerCommand} from '../../src/wager/SubmitWagerTransaction.usecase.js';
+import type {SubmitWagerCommand, SubmitWagerOutcome, WagerResult} from '../../src/wager/SubmitWagerTransaction.usecase.js';
 import * as walletMapper from '../../src/wallet/wallet.mapper.js';
 import * as txMapper from '../../src/wager/wagerTransaction.mapper.js';
 import * as ledgerMapper from '../../src/wallet/walletLedgerEntry.mapper.js';
@@ -12,6 +12,12 @@ import * as ledgerMapper from '../../src/wallet/walletLedgerEntry.mapper.js';
 export const brl = (amount: string) => Money.from({amount, currency: 'BRL'});
 
 export type WagerCommand = SubmitWagerCommand;
+
+// Narrows the use case outcome for tests that never pass an inbox.
+export function completed(outcome: SubmitWagerOutcome): WagerResult {
+    if (outcome.kind !== 'completed') throw new Error(`expected a completed outcome, got ${outcome.kind}`);
+    return outcome;
+}
 
 export const uniqueExternalId = () => `ext-${randomUUID()}`;
 
