@@ -13,6 +13,6 @@ export default defineConfig({
     globalSetup: ['test/support/globalSetup.ts'],
     testTimeout: 30000,
     hookTimeout: 60000,
-    env: { DATABASE_POOL_MAX: '60' }
+    env: { DATABASE_POOL_MAX: '60', WORKERS_ENABLED: 'false' }
   },
 });

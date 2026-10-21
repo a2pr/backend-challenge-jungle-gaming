@@ -2,7 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {CreateQueueCommand, Message, PurgeQueueCommand, ReceiveMessageCommand, SQSClient} from '@aws-sdk/client-sqs';
 
 // Endpoint, region and credentials come from AWS_* env vars (.env).
-export const sqs = new SQSClient({maxAttempts: 1});
+export const sqs = new SQSClient({maxAttempts: 1, useQueueUrlAsEndpoint: false});
 
 // Uniquely named throwaway queues, 2 s visibility so redelivery tests do not wait 30 s. Never the compose queues.
 export async function createTestQueues() {

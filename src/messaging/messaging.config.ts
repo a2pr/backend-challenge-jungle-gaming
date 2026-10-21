@@ -1,3 +1,5 @@
+export const MESSAGING_CONFIG = Symbol('MESSAGING_CONFIG');
+
 export interface MessagingConfig {
     wagerQueueUrl: string;
     wagerDlqUrl: string;

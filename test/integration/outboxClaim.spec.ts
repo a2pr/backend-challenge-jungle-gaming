@@ -1,6 +1,5 @@
 import {afterAll, beforeAll, beforeEach, describe, expect, it} from 'vitest';
 import {MikroORM} from '@mikro-orm/postgresql';
-import {randomUUID} from 'node:crypto';
 import {createOrm, resetSchema, truncateAll} from '../support/db.js';
 import {OutboxRepository} from '../../src/messaging/outbox.repository.js';
 
