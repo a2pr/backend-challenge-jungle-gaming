@@ -4,25 +4,14 @@ import Money from '../../src/money/money.js';
 import Wallet from '../../src/wallet/wallet.js';
 import WagerTransaction from '../../src/wager/wagerTransaction.js';
 import {WagerTransactionKind} from '../../src/wager/wagerTransactionKind.js';
+import type {SubmitWagerCommand} from '../../src/wager/SubmitWagerTransaction.usecase.js';
 import * as walletMapper from '../../src/wallet/wallet.mapper.js';
 import * as txMapper from '../../src/wager/wagerTransaction.mapper.js';
 import * as ledgerMapper from '../../src/wallet/walletLedgerEntry.mapper.js';
 
 export const brl = (amount: string) => Money.from({amount, currency: 'BRL'});
 
-// Input of the submit use case. Phase 4 step 4 owns the real type; keep this in sync with it.
-export interface WagerCommand {
-    providerId: string;
-    externalTransactionId: string;
-    idempotencyKey: string;
-    walletId: string;
-    playerId: string;
-    roundId: string;
-    gameId: string;
-    kind: WagerTransactionKind;
-    money: Money;
-    referenceExternalTransactionId?: string;
-}
+export type WagerCommand = SubmitWagerCommand;
 
 export const uniqueExternalId = () => `ext-${randomUUID()}`;
 

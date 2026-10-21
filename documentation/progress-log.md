@@ -84,6 +84,24 @@ Open: `seq` is not mapped yet (phase 5 pagination). `deployment.md` migration co
 
 Next: Phase 4 (use cases).
 
+## Phase 4: use cases (in progress, steps 0 to 4 done, 2026-10-21)
+
+State: `bun run test` 287+ passed (plus `errors.spec.ts`), `bun run test:e2e` 61 passed (16 repositories, 5 createWallet, 5 submitWagerTransaction, schema, mappers, support, 2 health e2e), `tsc`, `nest build` and lint clean.
+
+| Step | State | Detail |
+|---|---|---|
+| 0 Test support | done | `test/support/ledger.ts` (`assertLedgerMatchesBalance`), `fixtures.ts` (`openWallet`, `betCommand`, `runInParallel`) |
+| 1 Errors and events | done | `IntegrationEvent` and the four events with `events.spec.ts`; the three request errors exported with typed fields, `errors.spec.ts` |
+| 2 Repositories | done | wallet, wager transaction, ledger, outbox (enqueue), inbox; `test/integration/repositories.spec.ts` 16 tests including the lock actually blocking a second locker and a stale-version `save` |
+| 3 `CreateWallet` and modules | done | `CreateWalletUseCase`, `MessagingModule`, `WalletModule`, `@Injectable()` on the repositories; `createWallet.spec.ts` tests 13a to 13d plus a Nest wiring test |
+| 4 `SubmitWagerTransaction`, simple kinds | done | `run` (lock, build, wallet checks, apply, events, persist), `apply` free of I/O for the phase 7 reuse; tests 1 (the 80.00 race, three runs), 6 without references, 9b, unknown wallet, blank `roundId` |
+
+Bugs found on the way: raw SQL through `em.getConnection().execute(sql, params)` ran outside the transaction (it hung the stale-version test, and would have broken inbox and atomicity silently); fixed by passing `'all', em.getTransactionContext()`. The scaffold caught `DuplicateWalletError` where the ORM throws `UniqueConstraintViolationException`. `domainPurity` treated `wallet.module.ts` as domain code; `module` joined the adapter suffixes.
+
+Decisions (details in `ARCHITECTURE.md`, "Use case wiring"): two modules, no `WagerModule`; unique violation translated after the rollback; wager finders return `balanceAfter`.
+
+Open: `src/wager/wagerTrasanction.repository.ts` has a typo in its name (rename to `wagerTransaction.repository.ts`); the `5s` lock timeout is a guess until step 9; the submit use case file is `SubmitWagerTransaction.usecase.ts` (capital S). Next: step 5 (idempotency).
+
 ## WagerTransaction stubs: decisions deferred (superseded)
 
 **Superseded 2026-10-20:** every point below was decided (D1 to D11, D17, D18) and is written in `ARCHITECTURE.md` and `plan.md`. Kept only as history; delete when convenient. Original text:
