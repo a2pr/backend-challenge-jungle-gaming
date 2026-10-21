@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { backoffMs } from '../../../src/wager/backoff.js';
+import {
+  MAX_REFERENCE_RETRIES,
+  PENDING_REFERENCE_BACKOFF,
+} from '../../../src/wager/wagerTransaction.js';
 
 const seconds = (ms: number) => ms / 1000;
 
@@ -30,5 +34,27 @@ describe('backoffMs', () => {
     ['fractional cap', 1, 1000, 1.5],
   ])('throws for %s', (_label, attempts, base, cap) => {
     expect(() => backoffMs(attempts, base, cap)).toThrow();
+  });
+});
+
+describe('pending reference policy constants (D3)', () => {
+  const { baseMs, capMs } = PENDING_REFERENCE_BACKOFF;
+
+  it('produce the 20 / 40 / 80 / 120 second schedule', () => {
+    const delays = [0, 1, 2, 3].map((a) => seconds(backoffMs(a, baseMs, capMs)));
+    expect(delays).toEqual([20, 40, 80, 120]);
+  });
+
+  it('allow three retries, and the cap does not bind within them', () => {
+    expect(MAX_REFERENCE_RETRIES).toBe(3);
+    // retries use attempts 0..MAX-1; uncapped value of the last one is still under the cap
+    expect(baseMs * 2 ** (MAX_REFERENCE_RETRIES - 1)).toBeLessThanOrEqual(capMs);
+  });
+
+  it('total wait until the final rejection is 140 s after the first miss', () => {
+    const total = Array.from({ length: MAX_REFERENCE_RETRIES }, (_, a) =>
+      backoffMs(a, baseMs, capMs),
+    ).reduce((sum, ms) => sum + ms, 0);
+    expect(seconds(total)).toBe(140);
   });
 });

@@ -107,16 +107,16 @@ describe('predicates', () => {
     expect(brl('0.01').isPositive()).toBe(true);
     expect(brl('0.01').isNegative()).toBe(false);
 
-    expect(brl('-0.01').isNegative()).toBe(true);
-    expect(brl('-0.01').isPositive()).toBe(false);
-    expect(brl('-0.01').isZero()).toBe(false);
+    expect(brl('0.01').negate().isNegative()).toBe(true);
+    expect(brl('0.01').negate().isPositive()).toBe(false);
+    expect(brl('0.01').negate().isZero()).toBe(false);
   });
 
   it('isLessThan', () => {
     expect(brl('1.00').isLessThan(brl('1.01'))).toBe(true);
     expect(brl('1.01').isLessThan(brl('1.00'))).toBe(false);
     expect(brl('1.00').isLessThan(brl('1.00'))).toBe(false);
-    expect(brl('-1.00').isLessThan(brl('0.00'))).toBe(true);
+    expect(brl('1.00').negate().isLessThan(brl('0.00'))).toBe(true);
   });
 
   it('equals compares value, not representation', () => {

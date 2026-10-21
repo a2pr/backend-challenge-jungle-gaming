@@ -9,8 +9,11 @@ const pendingStatuses = [
     WagerTransactionStatus.Pending,
     WagerTransactionStatus.PendingReference
 ];
-// todo: shapes undecided, see progress-log.md ("WagerTransaction stubs")
-interface CreateWagerTransactionProps {
+
+export const PENDING_REFERENCE_BACKOFF = {baseMs: 20_000, capMs: 120_000} as const;
+export const MAX_REFERENCE_RETRIES = 3;
+
+export interface CreateWagerTransactionProps {
     id: string,
     providerId: string,
     externalTransactionId: string,
@@ -25,7 +28,7 @@ interface CreateWagerTransactionProps {
     now: Date
 }
 
-interface WagerTransactionState {
+export interface WagerTransactionState {
     id: string,
     providerId: string,
     externalTransactionId: string,
@@ -38,7 +41,7 @@ interface WagerTransactionState {
     kind: WagerTransactionKind,
     money: Money,
     referenceExternalTransactionId: string | undefined
-        createdAt: Date,
+    createdAt: Date,
     _status: WagerTransactionStatus,
     _referenceTransactionId?: string
     _failureCode?: FailureCode,
@@ -76,7 +79,6 @@ export default class WagerTransaction {
 
     /** Nasce em PENDING. Valida a exigência de referência por kind. */
     static create(_props: CreateWagerTransactionProps): WagerTransaction {
-
         return notImplemented();
     }
 
@@ -148,9 +150,10 @@ export default class WagerTransaction {
         return notImplemented();
     }
 
-    static assertWagerTransactionReference(_props: CreateWagerTransactionProps){
-        if(_props.kind === 'BET'){
-            if(_props.referenceExternalTransactionId != null)
-        }
-    }
+    /*
+        static assertWagerTransactionReference(_props: CreateWagerTransactionProps){
+            if(_props.kind === 'BET'){
+                if(_props.referenceExternalTransactionId != null)
+            }
+        }*/
 }

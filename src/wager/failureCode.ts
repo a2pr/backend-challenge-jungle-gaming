@@ -1,4 +1,3 @@
-// todo: taxonomy still open (README 7.2). Only the codes the README names explicitly.
 export enum FailureCode {
     InsufficientFunds = "INSUFFICIENT_FUNDS",
     InsufficientFundsForReversal = "INSUFFICIENT_FUNDS_FOR_REVERSAL",
@@ -10,5 +9,5 @@ export enum FailureCode {
     CurrencyMisMatch = "CURRENCY_MISMATCH",
     PlayerMismatch = "PLAYER_MISMATCH",
     AlreadyReversed = "ALREADY_REVERSED",
-    ProcessingError = "PROCESSING_ERROR",
+    ProcessingError = "PROCESSING_ERROR" // only valid for FAILED
 }
