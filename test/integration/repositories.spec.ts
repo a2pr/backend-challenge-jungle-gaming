@@ -9,7 +9,7 @@ import Wallet from '../../src/wallet/wallet.js';
 import WagerTransaction from '../../src/wager/wagerTransaction.js';
 import {WagerTransactionKind} from '../../src/wager/wagerTransactionKind.js';
 import {WalletRepository} from '../../src/wallet/wallet.repository.js';
-import {WagerTransactionRepository} from '../../src/wager/wagerTrasanction.repository.js';
+import {WagerTransactionRepository} from '../../src/wager/wagerTransaction.repository.js';
 import {WalletLedgerRepository} from '../../src/wallet/walletLedger.repository.js';
 import {OutboxRepository} from '../../src/messaging/outbox.repository.js';
 import {InboxRepository} from '../../src/messaging/inbox.repository.js';

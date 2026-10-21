@@ -6,7 +6,7 @@ import MoneyProps from "../money/dto/money.props.dto.js";
 import {Injectable} from "@nestjs/common";
 import {MikroORM} from "@mikro-orm/postgresql";
 import {WalletRepository} from "../wallet/wallet.repository.js";
-import {WagerTransactionRepository} from "./wagerTrasanction.repository.js";
+import {WagerTransactionRepository} from "./wagerTransaction.repository.js";
 import {WalletLedgerRepository} from "../wallet/walletLedger.repository.js";
 import {OutboxRepository} from "../messaging/outbox.repository.js";
 import {InboxRepository} from "../messaging/inbox.repository.js";

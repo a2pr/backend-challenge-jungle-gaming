@@ -2,7 +2,7 @@ import {Module} from "@nestjs/common";
 import {MessagingModule} from "../messaging/messaging.module.js";
 import {WalletRepository} from "./wallet.repository.js";
 import {WalletLedgerRepository} from "./walletLedger.repository.js";
-import {WagerTransactionRepository} from "../wager/wagerTrasanction.repository.js";
+import {WagerTransactionRepository} from "../wager/wagerTransaction.repository.js";
 import {CreateWalletUseCase} from "./createWallet.usecase.js";
 import {SubmitWagerTransactionUseCase} from "../wager/SubmitWagerTransaction.usecase.js";
 

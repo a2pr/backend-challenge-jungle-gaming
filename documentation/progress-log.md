@@ -84,9 +84,9 @@ Open: `seq` is not mapped yet (phase 5 pagination). `deployment.md` migration co
 
 Next: Phase 4 (use cases).
 
-## Phase 4: use cases (in progress, steps 0 to 7 done, 2026-10-21)
+## Phase 4: use cases (in progress, steps 0 to 9 done, 2026-10-21)
 
-State: `bun run test` 291 passed, `bun run test:e2e` 88 passed (16 repositories, 5 createWallet, 10 submitWagerTransaction, 13 references, 9 inbox, schema, mappers, support, 2 health e2e), `tsc`, `nest build` and lint clean.
+State: `bun run test` 291 passed, `bun run test:e2e` 91 passed (16 repositories, 5 createWallet, 10 submitWagerTransaction, 13 references, 9 inbox, 3 concurrency, schema, mappers, support, 2 health e2e), `tsc`, `nest build` and lint clean.
 
 | Step | State | Detail |
 |---|---|---|
@@ -98,6 +98,8 @@ State: `bun run test` 291 passed, `bun run test:e2e` 88 passed (16 repositories,
 | 5 Idempotency | done | key lookup (replay with stored `balanceAfter`, `IdempotencyConflictError`), external id lookup (`DuplicateExternalTransactionError`); tests 2 (50 parallel, 1 original and 49 replays), 3, 3b, 4, 5. Review added the missing null `balanceAfter` guard (`tsc` failed) |
 | 6 References and reversals | done | `resolveReference` (pending / rejected / found, `checkReference`, `findReversalOf`) and the branch in `run`; `references.spec.ts`: tests 6, 6b, 7, 7b, 7c, 8, 8b, 9 |
 | 7 Inbox and atomicity | done | `run` wraps `process`: `tryInsert` first, `markProcessed` last, same transaction; `execute` returns `SubmitWagerOutcome` (`completed` or `duplicate-message`); tests 12a to 12c, 14a to 14f |
+| 8 Concurrency suite | done | `concurrency.spec.ts`: 10a (200 bets, all processed), 10b (100 processed, 100 `INSUFFICIENT_FUNDS`, balance 0.00), 11 (20 wallets x 10 bets); three full runs 91 passed, 14.2 / 13.9 / 12.8 s |
+| 9 Contention experiment | done | `test/experiments/contention.spec.ts`; hot wallet 200 to 230 bets/s, spread wallets about 540, no `lock_timeout`; pool 200 fails against Postgres `max_connections` 100 (table in `ARCHITECTURE.md`) |
 
 Bugs found on the way (step 7): `RunInput` lacked `inbox` and `execute` never passed `ctx.inbox` on, so the inbox was dead code (and `tsc` failed). Fixed in review, covered by 14a.
 
@@ -107,7 +109,7 @@ Bugs found on the way: raw SQL through `em.getConnection().execute(sql, params)`
 
 Decisions (details in `ARCHITECTURE.md`, "Use case wiring"): two modules, no `WagerModule`; unique violation translated after the rollback; wager finders return `balanceAfter`.
 
-Open: `src/wager/wagerTrasanction.repository.ts` has a typo in its name (rename to `wagerTransaction.repository.ts`); the `5s` lock timeout is a guess until step 9; the submit use case file is `SubmitWagerTransaction.usecase.ts` (capital S). Next: step 8 (concurrency suite). Also open: unique-violation retry for the cross-wallet same-key race (decision documented, not implemented).
+Open: `../src/wager/wagerTransaction.repository.ts` has a typo in its name (rename to `wagerTransaction.repository.ts`); the `5s` lock timeout held in the step 9 experiment (worst wait 0.8 s); the submit use case file is `SubmitWagerTransaction.usecase.ts` (capital S). Next: step 10 (close out: docs, checks, commit, plus the renames). Also open: unique-violation retry for the cross-wallet same-key race (decision documented, not implemented).
 
 ## WagerTransaction stubs: decisions deferred (superseded)
 

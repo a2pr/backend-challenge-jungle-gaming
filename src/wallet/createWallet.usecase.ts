@@ -3,7 +3,7 @@ import {randomUUID} from "node:crypto";
 import Wallet from "./wallet.js";
 import {MikroORM} from "@mikro-orm/postgresql";
 import {WalletRepository} from "./wallet.repository.js";
-import {WagerTransactionRepository} from "../wager/wagerTrasanction.repository.js";
+import {WagerTransactionRepository} from "../wager/wagerTransaction.repository.js";
 import {WalletLedgerRepository} from "./walletLedger.repository.js";
 import {OutboxRepository} from "../messaging/outbox.repository.js";
 import {EntityManager, UniqueConstraintViolationException} from "@mikro-orm/core";

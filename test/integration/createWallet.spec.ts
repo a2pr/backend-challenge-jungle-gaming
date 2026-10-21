@@ -5,7 +5,7 @@ import {createOrm, resetSchema, truncateAll} from '../support/db.js';
 import {assertLedgerMatchesBalance} from '../support/ledger.js';
 import {CreateWalletUseCase} from '../../src/wallet/createWallet.usecase.js';
 import {WalletRepository} from '../../src/wallet/wallet.repository.js';
-import {WagerTransactionRepository} from '../../src/wager/wagerTrasanction.repository.js';
+import {WagerTransactionRepository} from '../../src/wager/wagerTransaction.repository.js';
 import {WalletLedgerRepository} from '../../src/wallet/walletLedger.repository.js';
 import {OutboxRepository} from '../../src/messaging/outbox.repository.js';
 import {Test} from '@nestjs/testing';
