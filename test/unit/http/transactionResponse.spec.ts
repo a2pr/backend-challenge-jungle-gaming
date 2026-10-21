@@ -1,7 +1,11 @@
 import {describe, expect, it} from 'vitest';
-import {toBody, toResponse} from '../../../src/http/transactionResponse.js';
+import {randomUUID} from 'node:crypto';
+import {toBody, toResponse, toStoredBody} from '../../../src/http/transactionResponse.js';
 import type {WagerResult} from '../../../src/wager/SubmitWagerTransaction.usecase.js';
 import {FailureCode} from '../../../src/wager/failureCode.js';
+import Money from '../../../src/money/money.js';
+import WagerTransaction from '../../../src/wager/wagerTransaction.js';
+import {WagerTransactionKind} from '../../../src/wager/wagerTransactionKind.js';
 import {WagerTransactionStatus} from '../../../src/wager/wagerTransactionStatus.js';
 
 const result = (o: Partial<WagerResult> = {}): WagerResult => ({
@@ -43,5 +47,34 @@ describe('toBody', () => {
         expect(toBody(result())).not.toHaveProperty('failureCode');
         expect(toBody(result({status: WagerTransactionStatus.Rejected, failureCode: FailureCode.InsufficientFunds})))
             .toMatchObject({failureCode: 'INSUFFICIENT_FUNDS'});
+    });
+});
+
+describe('toStoredBody', () => {
+    const now = new Date();
+    const bet = () => WagerTransaction.create({
+        id: randomUUID(), providerId: 'prov', externalTransactionId: 'ext-1', idempotencyKey: 'key-1', walletId: randomUUID(),
+        playerId: randomUUID(), roundId: 'r', gameId: 'g', kind: WagerTransactionKind.Bet,
+        money: Money.from({amount: '10.00', currency: 'BRL'}), now,
+    });
+
+    it('builds the body from the stored row: balanceAfter, the transaction currency, never a replay', () => {
+        const transaction = bet();
+        transaction.markProcessed(undefined, now);
+
+        expect(toStoredBody({transaction, balanceAfter: '90.00'})).toEqual({
+            transactionId: transaction.id, status: 'PROCESSED', balance: {amount: '90.00', currency: 'BRL'}, idempotentReplay: false,
+        });
+    });
+
+    it('carries the failureCode of a rejected row', () => {
+        const transaction = bet();
+        transaction.reject(FailureCode.InsufficientFunds);
+
+        expect(toStoredBody({transaction, balanceAfter: '5.00'})).toMatchObject({status: 'REJECTED', failureCode: 'INSUFFICIENT_FUNDS'});
+    });
+
+    it('a row without balanceAfter is a bug, not a request error', () => {
+        expect(() => toStoredBody({transaction: bet(), balanceAfter: null})).toThrow(/no balanceAfter/);
     });
 });

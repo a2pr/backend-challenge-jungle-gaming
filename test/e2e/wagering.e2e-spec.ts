@@ -40,6 +40,16 @@ const walletBalance = async (walletId: string) => (await http.get(`/wallets/${wa
 const countRows = async (table: string, walletId: string) =>
     Number((await orm.em.getConnection().execute(`SELECT COUNT(*)::int AS n FROM ${table} WHERE wallet_id = ?`, [walletId]))[0].n);
 
+// A FAILED row is only written by the consumer (phase 7), so tests create it directly, with the hash the request produces.
+async function insertFailed(body: Record<string, unknown>, idempotencyKey: string, balanceAfter = '100.00') {
+    const failed = WagerTransaction.create({id: randomUUID(), ...toCommand(submitTransactionSchema.parse(body), idempotencyKey), now: new Date()});
+    failed.fail(FailureCode.ProcessingError);
+    const em = orm.em.fork();
+    em.persist(txMapper.toRow(failed, {balanceAfter}));
+    await em.flush();
+    return failed;
+}
+
 describe('POST /wagering/transactions: outcomes', () => {
     it('processes a BET: 200, balance reduced, one ledger debit', async () => {
         const wallet = await openWallet(orm, '100.00');
@@ -140,12 +150,7 @@ describe('POST /wagering/transactions: idempotency', () => {
         const wallet = await openWallet(orm, '100.00');
         const k = key();
         const body = bodyFor(wallet);
-        // A FAILED row is only written by the consumer (phase 7), so create it directly, with the hash this request produces.
-        const failed = WagerTransaction.create({id: randomUUID(), ...toCommand(submitTransactionSchema.parse(body), k), now: new Date()});
-        failed.fail(FailureCode.ProcessingError);
-        const em = orm.em.fork();
-        em.persist(txMapper.toRow(failed, {balanceAfter: '100.00'}));
-        await em.flush();
+        await insertFailed(body, k);
 
         const res = await submit(k, body).expect(409);
 
@@ -275,5 +280,112 @@ describe('POST /wagering/transactions: infrastructure failure', () => {
         } finally {
             await broken.app.close();
         }
+    });
+});
+
+describe('GET transactions', () => {
+    const byId = (id: string) => http.get(`/wagering/transactions/${id}`);
+    const byExternal = (provider: string, externalId: string) =>
+        http.get(`/providers/${encodeURIComponent(provider)}/wagering/transactions/${encodeURIComponent(externalId)}`);
+    const countTransactions = async () =>
+        Number((await orm.em.getConnection().execute('SELECT COUNT(*)::int AS n FROM wager_transactions'))[0].n);
+
+    it('returns a PROCESSED transaction by id and by provider external id, the same body as the POST (without the replay flag)', async () => {
+        const wallet = await openWallet(orm, '100.00');
+        const body = bodyFor(wallet);
+        const posted = await submit(key(), body).expect(200);
+
+        const viaId = await byId(posted.body.transactionId).expect(200);
+        const viaExternal = await byExternal('prov-1', body.externalTransactionId).expect(200);
+
+        expect(viaId.body).toEqual(posted.body);
+        expect(viaExternal.body).toEqual(posted.body);
+    });
+
+    it('a REJECTED transaction is 200 on a GET (422 only on the POST), with its failureCode', async () => {
+        const wallet = await openWallet(orm, '100.00');
+        const posted = await submit(key(), bodyFor(wallet, {money: money('500.00')})).expect(422);
+
+        const res = await byId(posted.body.transactionId).expect(200);
+
+        expect(res.body).toEqual({
+            transactionId: posted.body.transactionId, status: 'REJECTED', failureCode: 'INSUFFICIENT_FUNDS',
+            balance: money('100.00'), idempotentReplay: false,
+        });
+    });
+
+    it('a PENDING_REFERENCE transaction is 200 with its status', async () => {
+        const wallet = await openWallet(orm, '100.00');
+        const posted = await submit(key(), bodyFor(wallet, {kind: 'REFUND', referenceExternalTransactionId: 'not-seen'})).expect(202);
+
+        const res = await byId(posted.body.transactionId).expect(200);
+
+        expect(res.body).toMatchObject({status: 'PENDING_REFERENCE', balance: money('100.00')});
+        expect(res.body).not.toHaveProperty('failureCode');
+    });
+
+    it('a FAILED transaction is 200 with PROCESSING_ERROR', async () => {
+        const wallet = await openWallet(orm, '100.00');
+        const body = bodyFor(wallet);
+        const failed = await insertFailed(body, key());
+
+        const res = await byExternal('prov-1', body.externalTransactionId).expect(200);
+
+        expect(res.body).toEqual({
+            transactionId: failed.id, status: 'FAILED', failureCode: 'PROCESSING_ERROR', balance: money('100.00'), idempotentReplay: false,
+        });
+    });
+
+    it('balance is the balance after that transaction, not the wallet\'s current balance', async () => {
+        const wallet = await openWallet(orm, '100.00');
+        const first = await submit(key(), bodyFor(wallet)).expect(200);
+        await submit(key(), bodyFor(wallet)).expect(200);
+
+        const res = await byId(first.body.transactionId).expect(200);
+
+        expect(res.body.balance).toEqual(money('90.00'));
+        expect(await walletBalance(wallet.walletId)).toBe('80.00');
+    });
+
+    it('an external id with characters that need URL encoding is found', async () => {
+        const wallet = await openWallet(orm, '100.00');
+        const externalTransactionId = 'provider-a:transaction 123/x';
+        await submit(key(), bodyFor(wallet, {externalTransactionId})).expect(200);
+
+        await byExternal('prov-1', externalTransactionId).expect(200);
+    });
+
+    it('an unknown id is 404 TRANSACTION_NOT_FOUND', async () => {
+        const res = await byId(randomUUID()).expect(404);
+        expect(res.body).toMatchObject({status: 404, code: 'TRANSACTION_NOT_FOUND', retryable: false});
+    });
+
+    it('an id that is not a uuid is 400, not a database error', async () => {
+        const res = await byId('not-a-uuid').expect(400);
+        expect(res.body).toMatchObject({status: 400, code: 'VALIDATION_ERROR'});
+    });
+
+    it('an unknown external id is 404, and so is a known one under another provider', async () => {
+        const wallet = await openWallet(orm, '100.00');
+        const body = bodyFor(wallet);
+        await submit(key(), body).expect(200);
+
+        await byExternal('prov-1', 'never-sent').expect(404);
+        const otherProvider = await byExternal('prov-2', body.externalTransactionId).expect(404);
+        expect(otherProvider.body.code).toBe('TRANSACTION_NOT_FOUND');
+    });
+
+    it('reads change nothing', async () => {
+        const wallet = await openWallet(orm, '100.00');
+        const body = bodyFor(wallet);
+        const posted = await submit(key(), body).expect(200);
+        const rows = await countTransactions();
+
+        await byId(posted.body.transactionId).expect(200);
+        await byExternal('prov-1', body.externalTransactionId).expect(200);
+
+        expect(await countTransactions()).toBe(rows);
+        expect(await walletBalance(wallet.walletId)).toBe('90.00');
+        await assertLedgerMatchesBalance(orm, wallet.walletId);
     });
 });

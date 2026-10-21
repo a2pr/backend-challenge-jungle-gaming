@@ -8,6 +8,8 @@ import {betCommand, brl, openWallet} from '../support/fixtures.js';
 import Wallet from '../../src/wallet/wallet.js';
 import WagerTransaction from '../../src/wager/wagerTransaction.js';
 import {WagerTransactionKind} from '../../src/wager/wagerTransactionKind.js';
+import {FailureCode} from '../../src/wager/failureCode.js';
+import {WagerTransactionStatus} from '../../src/wager/wagerTransactionStatus.js';
 import {WalletRepository} from '../../src/wallet/wallet.repository.js';
 import {WagerTransactionRepository} from '../../src/wager/wagerTransaction.repository.js';
 import {WalletLedgerRepository} from '../../src/wallet/walletLedger.repository.js';
@@ -141,6 +143,20 @@ describe('WagerTransactionRepository', () => {
         expect(byExternal?.transaction.id).toBe(bet.id);
         expect(await inTx((em) => wagers.findByIdempotencyKey(em, 'other-provider', bet.idempotencyKey))).toBeNull();
         expect(await inTx((em) => wagers.findByExternalId(em, bet.providerId, 'nope'))).toBeNull();
+    });
+
+    it('findById returns any status with its balanceAfter, and null for an unknown id', async () => {
+        const {walletId, playerId} = await openWallet(orm, '100.00');
+        const rejected = newBet(walletId, playerId);
+        rejected.reject(FailureCode.InsufficientFunds);
+        await inTx((em) => wagers.insert(em, rejected, {balanceAfter: '100.00'}));
+
+        const found = await inTx((em) => wagers.findById(em, rejected.id));
+
+        expect(found?.transaction.status).toBe(WagerTransactionStatus.Rejected);
+        expect(found?.transaction.failureCode).toBe(FailureCode.InsufficientFunds);
+        expect(found?.balanceAfter).toBe('100.00');
+        expect(await inTx((em) => wagers.findById(em, randomUUID()))).toBeNull();
     });
 
     it('findProcessedById ignores rows that are not PROCESSED', async () => {

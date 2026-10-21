@@ -16,6 +16,11 @@ export class WagerTransactionRepository {
         return row ? {transaction: toDomain(row), balanceAfter: row.balanceAfter} : null;
     }
 
+    async findById(em: EntityManager, id: string): Promise<StoredWager | null> {
+        const row = await em.findOne(WagerTransactionRow, {id});
+        return row ? {transaction: toDomain(row), balanceAfter: row.balanceAfter} : null;
+    }
+
     // Also the reference lookup: callers pass referenceExternalTransactionId as externalId.
     async findByExternalId(em: EntityManager, providerId: string, externalId: string): Promise<StoredWager | null> {
         const row = await em.findOne(WagerTransactionRow, {providerId, externalTransactionId: externalId});
