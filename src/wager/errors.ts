@@ -41,7 +41,15 @@ class DuplicateExternalTransactionError extends Error {
     }
 }
 
+class TransactionNotFoundError extends Error {
+    constructor(public readonly reference: string) {
+        super(`Transaction ${reference} not found`);
+        this.name = "TransactionNotFoundError";
+        Object.setPrototypeOf(this, TransactionNotFoundError.prototype);
+    }
+}
+
 export {
     InvalidWagerTransactionError, InvalidTransactionStateError,
-    WalletNotFoundError, IdempotencyConflictError, DuplicateExternalTransactionError,
+    WalletNotFoundError, IdempotencyConflictError, DuplicateExternalTransactionError, TransactionNotFoundError,
 }

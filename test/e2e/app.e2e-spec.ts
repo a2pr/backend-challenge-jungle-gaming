@@ -1,36 +1,24 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
-import request from 'supertest';
-// @ts-ignore
-import { App } from 'supertest/types';
-import {AppModule} from "../../src/app.module.js";
+import {INestApplication} from '@nestjs/common';
+import {createTestApp} from '../support/app.js';
 
 describe('AppController (e2e)', () => {
-  let app: INestApplication<App>;
+  let app: INestApplication;
+  let http: Awaited<ReturnType<typeof createTestApp>>['http'];
 
   beforeEach(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-
-    app = moduleFixture.createNestApplication();
-    await app.init();
+    ({app, http} = await createTestApp());
   });
 
-  it('/health/live (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/health/live')
-      .expect(200)
-      .expect('OK');
-  });
-  it('/health/ready (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/health/ready')
-      .expect(200)
-      .expect('OK');
+  it('the global filter answers with the error body shape, not Nest\'s default', async () => {
+    const res = await http.get('/no-such-route').expect(404);
+    expect(res.body).toMatchObject({status: 404, code: 'HTTP_ERROR', retryable: false});
   });
 
   afterEach(async () => {
     await app.close();
   });
+
+  // No auth header is sent: health stays public (README §9).
+  it('/health/live (GET)', () => http.get('/health/live').expect(200).expect('OK'));
+  it('/health/ready (GET)', () => http.get('/health/ready').expect(200).expect('OK'));
 });
