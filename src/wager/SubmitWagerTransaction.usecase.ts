@@ -10,7 +10,7 @@ import {WagerTransactionRepository} from "./wagerTransaction.repository.js";
 import {WalletLedgerRepository} from "../wallet/walletLedger.repository.js";
 import {OutboxRepository} from "../messaging/outbox.repository.js";
 import {InboxRepository} from "../messaging/inbox.repository.js";
-import {EntityManager} from "@mikro-orm/core";
+import {EntityManager, UniqueConstraintViolationException} from "@mikro-orm/core";
 import WagerTransaction from "./wagerTransaction.js";
 import Wallet from "../wallet/wallet.js";
 import WalletLedgerEntry, {LedgerDirection} from "../wallet/walletLedgerEntry.js";
@@ -84,7 +84,20 @@ export class SubmitWagerTransactionUseCase {
     ) {
     }
 
+    // The same key on two different wallets is not serialised by a wallet lock, so the loser hits a unique index.
+    // The whole transaction rolled back, so one retry finds the winner's row and answers as a replay or a conflict.
+    // The catch wraps the whole attempt (not one statement): a failed statement aborts the Postgres transaction.
+    // A second violation (another unique index) escapes: one retry, never a loop.
     async execute(command: SubmitWagerCommand, ctx?: SubmitWagerContext): Promise<SubmitWagerOutcome> {
+        try {
+            return await this.attempt(command, ctx)
+        } catch (error) {
+            if (!(error instanceof UniqueConstraintViolationException)) throw error
+            return this.attempt(command, ctx)
+        }
+    }
+
+    private attempt(command: SubmitWagerCommand, ctx?: SubmitWagerContext): Promise<SubmitWagerOutcome> {
         let now = new Date()
         let transactionId = randomUUID()
         let correlationId = ctx?.correlationId ?? randomUUID()
