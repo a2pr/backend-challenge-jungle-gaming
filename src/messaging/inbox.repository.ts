@@ -1,19 +1,15 @@
 import {Injectable} from "@nestjs/common";
 import {EntityManager} from "@mikro-orm/core";
 import {InboxMessageRow} from "./inboxMessage.schema.js";
+import type {InboxMessage} from "./inboxMessage.js";
 
-export interface InboxMessage {
-    consumerName: string;
-    messageId: string;
-    payloadHash: string;
-    receivedAt: Date;
-}
+type InboxInsert = Pick<InboxMessage, 'consumerName' | 'messageId' | 'payloadHash' | 'receivedAt'>;
 
 @Injectable()
 export class InboxRepository {
     // true: first time this (consumer, message) is seen. false: already committed, the caller acks and skips.
     // A concurrent duplicate blocks on the primary key until the first transaction ends, then returns false.
-    async tryInsert(em: EntityManager, message: InboxMessage): Promise<boolean> {
+    async tryInsert(em: EntityManager, message: InboxInsert): Promise<boolean> {
         const rows = await em.getConnection().execute(
             `INSERT INTO inbox_messages (consumer_name, message_id, payload_hash, received_at)
              VALUES (?, ?, ?, ?)
