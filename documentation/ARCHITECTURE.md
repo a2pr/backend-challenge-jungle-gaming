@@ -152,6 +152,8 @@ The guarantees live in the schema, not only in the code: `CHECK (balance >= 0)`,
 
 | Where | Deviation | Why |
 |---|---|---|
+| `SubmitWagerTransactionUseCase.execute` | Returns `SubmitWagerOutcome` (`completed` or `duplicate-message`), not only `WagerResult`; the context may carry `inbox` | The inbox check is part of the same transaction (see "Inbox in the submit transaction") |
+| Reference lookup | A reference under another provider is *not found* (`PENDING_REFERENCE`), not `REFERENCE_MISMATCH` | The lookup is scoped by provider; the provider check in `checkReference` is unreachable from the use case |
 | `WagerTransaction` | Constructor and state gain `attempts` and `nextAttemptAt`; `markPendingReference` takes `now` | The retry is a domain step (D2, D3) |
 | `WagerTransaction` | Two kinds of wrong call, two kinds of error: request-shaped mistakes (a `BET` with a reference, a zero `BET`, a blank field) throw `InvalidWagerTransactionError` (phase 5 maps it to 400); programming mistakes (`reject(PROCESSING_ERROR)`, `fail` with any other code, `ledgerDirectionFor` on a `LOSS`, `markPendingReference` after the limit) throw a plain `Error` | A bug in the caller must never become a 400 that tells the provider to fix its request |
 | `WagerTransaction` | `State` uses public names (`status`, `failureCode`, ...), not the private `_` ones; `hasReference()` and `checkReference(reference)` added; `checkReference` ignores the reference's status (D18) and "already reversed" (D5), both are the use case's | The phase 3 mapper must not depend on private naming; the status and reversal checks need data |

@@ -84,7 +84,7 @@ Open: `seq` is not mapped yet (phase 5 pagination). `deployment.md` migration co
 
 Next: Phase 4 (use cases).
 
-## Phase 4: use cases (in progress, steps 0 to 9 done, 2026-10-21)
+## Phase 4: use cases (done 2026-10-21)
 
 State: `bun run test` 291 passed, `bun run test:e2e` 91 passed (16 repositories, 5 createWallet, 10 submitWagerTransaction, 13 references, 9 inbox, 3 concurrency, schema, mappers, support, 2 health e2e), `tsc`, `nest build` and lint clean.
 
@@ -109,7 +109,14 @@ Bugs found on the way: raw SQL through `em.getConnection().execute(sql, params)`
 
 Decisions (details in `ARCHITECTURE.md`, "Use case wiring"): two modules, no `WagerModule`; unique violation translated after the rollback; wager finders return `balanceAfter`.
 
-Open: `../src/wager/wagerTransaction.repository.ts` has a typo in its name (rename to `wagerTransaction.repository.ts`); the `5s` lock timeout held in the step 9 experiment (worst wait 0.8 s); the submit use case file is `SubmitWagerTransaction.usecase.ts` (capital S). Next: step 10 (close out: docs, checks, commit, plus the renames). Also open: unique-violation retry for the cross-wallet same-key race (decision documented, not implemented).
+Closed: the repository file was renamed to `wagerTransaction.repository.ts`.
+
+Open items for the next phases:
+
+- **Phase 5 (HTTP):** map `WalletNotFoundError` 404, `IdempotencyConflictError` and `DuplicateExternalTransactionError` 409, `InvalidWagerTransactionError` and `InvalidMoneyError` 400, a Postgres `55P03` (lock timeout) to a retryable status; read `result.kind` (`SubmitWagerOutcome`); ledger `page` and reconciliation (reuse `sumByWallet`); decide the cross-wallet same-key retry (unique violation around `em.transactional`, one retry); keep `DATABASE_POOL_MAX` below Postgres `max_connections` (see `tests.md`).
+- **Phase 6 (outbox):** `claimDue` with `FOR UPDATE SKIP LOCKED`, publisher, retries.
+- **Phase 7 (consumer):** build `ctx.inbox` from the SQS message, ack on `duplicate-message`, `reprocess`, `findDuePendingReference`, end a pending reference as `REFERENCE_NOT_FOUND` after the retry limit (`markPendingReference` throws at the limit, so the worker must call `reject` first), `FAILED` rows and the DLQ.
+- **Housekeeping:** `SubmitWagerTransaction.usecase.ts` casing (cosmetic); time per step was not recorded (start in phase 5).
 
 ## WagerTransaction stubs: decisions deferred (superseded)
 
