@@ -1,6 +1,6 @@
 import {Migration} from "@mikro-orm/migrations";
 
-export class Migration20261021 extends Migration {
+export class Migration20261021104500 extends Migration {
 
     async up(): Promise<void> {
         this.addSql('CREATE TABLE wallets (\n' +
@@ -87,6 +87,15 @@ export class Migration20261021 extends Migration {
             '  published_at    timestamptz\n' +
             ');');
         this.addSql('CREATE INDEX outbox_due ON outbox_messages (next_attempt_at) WHERE published_at IS NULL;');
+    }
+
+    async down(): Promise<void> {
+        this.addSql('DROP TABLE IF EXISTS outbox_messages;');
+        this.addSql('DROP TABLE IF EXISTS inbox_messages;');
+        this.addSql('DROP TABLE IF EXISTS wallet_ledger_entries;');   // drops its trigger and indexes with it
+        this.addSql('DROP FUNCTION IF EXISTS ledger_is_append_only();');
+        this.addSql('DROP TABLE IF EXISTS wager_transactions;');
+        this.addSql('DROP TABLE IF EXISTS wallets;');
     }
 
 }
