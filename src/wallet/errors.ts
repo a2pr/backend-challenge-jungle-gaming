@@ -9,3 +9,11 @@ export class InsufficientFundsError extends Error{
         Object.setPrototypeOf(this, InsufficientFundsError.prototype);
     }
 }
+export class DuplicateWalletError extends Error{
+    constructor(message:string) {
+        super(message);
+
+        this.name = "DuplicateWalletError";
+        Object.setPrototypeOf(this, DuplicateWalletError.prototype);
+    }
+}
