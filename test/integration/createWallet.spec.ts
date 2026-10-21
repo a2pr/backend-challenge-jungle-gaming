@@ -8,6 +8,8 @@ import {WalletRepository} from '../../src/wallet/wallet.repository.js';
 import {WagerTransactionRepository} from '../../src/wager/wagerTrasanction.repository.js';
 import {WalletLedgerRepository} from '../../src/wallet/walletLedger.repository.js';
 import {OutboxRepository} from '../../src/messaging/outbox.repository.js';
+import {Test} from '@nestjs/testing';
+import {AppModule} from '../../src/app.module.js';
 import {DuplicateWalletError} from '../../src/wallet/errors.js';
 import {InvalidMoneyError} from '../../src/money/errors.js';
 
@@ -72,5 +74,16 @@ describe('CreateWallet (test 13)', () => {
 
         expect([await count('wallets'), await count('wager_transactions'),
             await count('wallet_ledger_entries'), await count('outbox_messages')]).toEqual([0, 0, 0, 0]);
+    });
+});
+
+describe('Nest wiring', () => {
+    it('AppModule resolves CreateWalletUseCase with all its dependencies', async () => {
+        const module = await Test.createTestingModule({imports: [AppModule]}).compile();
+        try {
+            expect(module.get(CreateWalletUseCase)).toBeInstanceOf(CreateWalletUseCase);
+        } finally {
+            await module.close();
+        }
     });
 });

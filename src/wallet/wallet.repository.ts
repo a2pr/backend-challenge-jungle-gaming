@@ -1,8 +1,10 @@
+import {Injectable} from "@nestjs/common";
 import Wallet from "./wallet.js";
 import {EntityManager, LockMode} from "@mikro-orm/core";
 import {toDomain, toRow} from "./wallet.mapper.js";
 import {WalletRow} from "./wallet.schema.js";
 
+@Injectable()
 export class WalletRepository {
     async lockById(em: EntityManager, id: string): Promise<Wallet | null> {
         const results = await em.findOne(WalletRow, id, {

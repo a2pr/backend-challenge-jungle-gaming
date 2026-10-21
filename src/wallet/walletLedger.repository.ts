@@ -1,8 +1,10 @@
+import {Injectable} from "@nestjs/common";
 import {EntityManager} from "@mikro-orm/core";
 import WalletLedgerEntry from "./walletLedgerEntry.js";
 import {WalletLedgerEntryRow} from "./walletLedgerEntry.schema.js";
 import {toRow} from "./walletLedgerEntry.mapper.js";
 
+@Injectable()
 export class WalletLedgerRepository {
     // The table is append-only (DB trigger), so there is no update path.
     async insert(em: EntityManager, entry: WalletLedgerEntry): Promise<void> {

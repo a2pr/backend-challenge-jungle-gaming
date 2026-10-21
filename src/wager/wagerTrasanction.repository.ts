@@ -1,3 +1,4 @@
+import {Injectable} from "@nestjs/common";
 import {EntityManager} from "@mikro-orm/core";
 import WagerTransaction from "./wagerTransaction.js";
 import {WagerTransactionRow} from "./wagerTransaction.schema.js";
@@ -8,6 +9,7 @@ import {WagerTransactionStatus} from "./wagerTransactionStatus.js";
 // balanceAfter is not domain state, so replays read it from here.
 export type StoredWager = { transaction: WagerTransaction; balanceAfter: string | null };
 
+@Injectable()
 export class WagerTransactionRepository {
     async findByIdempotencyKey(em: EntityManager, providerId: string, key: string): Promise<StoredWager | null> {
         const row = await em.findOne(WagerTransactionRow, {providerId, idempotencyKey: key});

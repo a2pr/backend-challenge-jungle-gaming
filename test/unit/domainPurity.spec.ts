@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const folders = ['src/money', 'src/money/dto', 'src/wager', 'src/wallet'];
 // adapters added in later phases may use the framework, the domain may not
-const adapter = /\.(schema|mapper|repository|usecase|controller)\.ts$/;
+const adapter = /\.(schema|mapper|repository|usecase|controller|module)\.ts$/;
 
 const domainFiles = folders.flatMap((dir) =>
   readdirSync(dir)

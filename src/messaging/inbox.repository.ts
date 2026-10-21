@@ -1,3 +1,4 @@
+import {Injectable} from "@nestjs/common";
 import {EntityManager} from "@mikro-orm/core";
 import {InboxMessageRow} from "./inboxMessage.schema.js";
 
@@ -8,6 +9,7 @@ export interface InboxMessage {
     receivedAt: Date;
 }
 
+@Injectable()
 export class InboxRepository {
     // true: first time this (consumer, message) is seen. false: already committed, the caller acks and skips.
     // A concurrent duplicate blocks on the primary key until the first transaction ends, then returns false.
