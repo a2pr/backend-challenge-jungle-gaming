@@ -1,10 +1,8 @@
 import Money from "../money/money.js";
-import {CurrencyMismatchError} from "../money/errors.js";
 import {InvalidMovementError} from "./errors.js";
 
 export enum LedgerDirection { Debit = "DEBIT", Credit = "CREDIT" }
 
-// todo: shapes undecided, see progress-log.md
 export interface CreateLedgerEntryProps {
     id: string;
     walletId: string;

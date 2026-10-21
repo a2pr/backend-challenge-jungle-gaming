@@ -1,6 +1,6 @@
 # Progress log
 
-Status against the README (`README.md`, section numbers in brackets). Updated 2026-10-20.
+Status against the README (`README.md`, section numbers in brackets). Updated 2026-10-21.
 
 ## Done
 
@@ -12,7 +12,7 @@ Status against the README (`README.md`, section numbers in brackets). Updated 20
 | ORM wiring [4] | MikroORM v7 + `@mikro-orm/nestjs`, config from `DATABASE_URL`, schema-file discovery (`*.schema.ts`) | `src/mikro-orm.config.ts`, `src/app.module.ts` |
 | Health checks [9] | `GET /health/live` always 200. `GET /health/ready` probes Postgres (`select 1`) and SQS (`ListQueues`), 2 s timeout each, 503 with per-dependency booleans on failure | `src/health.*.ts` |
 | Money value object [6.1] | `Money` on `decimal.js`: scale-2 string in/out, immutable, currency-mismatch errors, sign predicates. 38 unit tests passing (`0.1 + 0.2`, invalid inputs, `negate` of zero, mismatch on every binary op, JSON round trip) | `../src/money/money.ts`, `src/money/dto/money.props.dto.ts`, `test/money/money.spec.ts` |
-| Domain vocabulary [6.3, 6.4, 7.2] | Kind/status enums, `FailureCode` (ten codes + `PROCESSING_ERROR`), typed errors, `backoffMs`. `WagerTransaction`, `WalletLedgerEntry` and `payloadHash` are still stubs (bodies `not implemented` / `TODO`). See "Phase 2" below | `src/wager/*`, `src/wallet/walletLedgerEntry.ts` |
+| Domain model [6.0 to 6.4, 7.2] | Phase 2 complete: `Money`, `Wallet` (debit/credit return the ledger entry, `openingEntry`), `WalletLedgerEntry`, `WagerTransaction` (rule table, state machine, retry state, `checkReference`, `ledgerDirectionFor`), `payloadHash`, `backoffMs`, typed errors, `FailureCode`. 280 unit tests. See "Phase 2" below | `src/money`, `src/wager`, `src/wallet`, `test/unit` |
 | SQS client | `@aws-sdk/client-sqs` added; endpoint/region/credentials via `AWS_*` env vars (no config code) | `docker-compose.yaml` |
 
 ## Decisions taken so far (Money decisions are already in `ARCHITECTURE.md`; the rest are to be copied)
@@ -39,24 +39,28 @@ Status against the README (`README.md`, section numbers in brackets). Updated 20
 | Docs | 5 | `ARCHITECTURE.md` started (Money section only). `tests.md` and taxonomy file missing. `deployment.md` written |
 | Auth [2] | 0 | Not started. README accepts skipping if the decision and extension point (no-op guard/port) are documented |
 
-## Phase 2: domain model (verified 2026-10-20, 5:45 pm, uncommitted work on top of `67c2d08`)
+## Phase 2: domain model (done 2026-10-21)
 
-Plan item numbers are those of `plan.md`, Phase 2. About 50% done. State: `bun run test` 67 passed (Money 40, `backoffMs` 9, `payloadHash` 18: specs in `test/unit/wager/`; none yet for wallet, ledger, transaction); **`tsc` fails** with one error, `src/wager/wagerTransaction.ts(154,9) TS1109 Expression expected`, from the half-written `assertWagerTransactionReference`.
+State: `bun run test` 280 passed in 7 files (`money`, `backoff`, `payloadHash`, `wagerTransaction`, `wallet`, `walletLedgerEntry`, `domainPurity`); `bunx tsc --noEmit` clean; `bun run build` ok; `bun run lint` clean. Coverage of the domain folders: 99.33% lines, 95.74% branches (`money.ts` 96.77%, `wagerTransaction.ts` 99.28%, every other file 100%). Note: vitest's text reporter hides files at 100%, so the table looks shorter than the folder; use `--coverage.reporter=json-summary` to see every file.
 
 | Item | State | Detail |
 |---|---|---|
-| 1 Money errors | done | `InvalidMoneyError`, `CurrencyMismatchError` (name fixed); no `expected`/`received` fields (optional) |
-| 2 Money uses them | done | typed errors everywhere in `src/money`; spec asserts the classes (verified 5:35 pm) |
-| 3 `FailureCode` | done | ten codes + `PROCESSING_ERROR`; stale `todo` comment, `MisMatch` casing typos in member names |
-| 4 `InvalidTransactionStateError` | done | moved into `src/wager/errors.ts` (with `InvalidWagerTransactionError`); the separate file was deleted |
-| 5 `payloadHash` | done, tested | verified by running: order-independent, `Money` via `toJSON`, `undefined` = absent, `idempotencyKey` ignored, each of the 9 fields changes the hash; golden `b1d776f3…fb09c` for the plan's fixed input |
-| 6 `backoffMs` | done, tested | table values match; integer guard throws for negative, fractional and `NaN`; policy constants still to add in `wagerTransaction.ts` |
-| 7 `WagerTransaction` | started | 7a types final (state fields still `_`-prefixed); 7c "from terminal throws" guard in the four transitions, bodies `notImplemented()`, `markPendingReference` lacks `now`; 7b stub breaks the build; 7d to 7g not started; `attempts` / `nextAttemptAt` not in the constructor |
-| 8 `WalletLedgerEntry` | not started | stub with `unknown` types |
-| 9 `Wallet` | not started | `open` only (still uses `new Date()`, public `_createdAt`, plain `Error`) |
-| Tests | partial | `backoff.spec.ts` and `payloadHash.spec.ts` written (incl. golden hash), Money spec extended with typed-error checks; `wagerTransaction`, `wallet`, `walletLedgerEntry` and `domainPurity` specs still missing; purity check is trivially true today (no `@nestjs` / `@mikro-orm` import in `src/money`, `src/wager`, `src/wallet`) |
+| 1-2 Money errors | done | typed `InvalidMoneyError`, `CurrencyMismatchError`; `Money.from` rejects negatives (negative values come from `negate` / `subtract`) |
+| 3 `FailureCode` | done | `ReversalAmountMismatch` and `CurrencyMismatch` renamed, values unchanged |
+| 4 `InvalidTransactionStateError` | done | in `src/wager/errors.ts` |
+| 5 `payloadHash` | done | golden value pinned |
+| 6 `backoffMs` | done | policy constants in `wagerTransaction.ts`, pinned by `backoff.spec.ts` |
+| 7 `WagerTransaction` | done | `create` rule table (21 amount cases, 8 blank fields), transitions with the 12-case terminal matrix, retry timeline 20 / 60 / 140 s, `ledgerDirectionFor`, `checkReference` with the 6 x 6 kind matrix |
+| 8 `WalletLedgerEntry` | done | validation order and `rehydrate` without validation |
+| 9 `Wallet` | done | `open`, `rehydrate`, `debit`, `credit`, `openingEntry`; failed movements leave balance, version and `updatedAt` untouched |
+| 10 `src/wallet/errors.ts` | done | `InvalidMovementError`, `InsufficientFundsError` |
+| Specs | done | all seven files above, including `domainPurity` (no `@nestjs`, `@mikro-orm`, `new Date()`, `Date.now()` or `randomUUID` in `src/money`, `src/wager`, `src/wallet`; adapter suffixes skipped) |
 
-Next, in order: make `tsc` green (delete `assertWagerTransactionReference`, rules go into `create`), write the specs for 5 and 6, fix the `FailureCode` comment, then 8, 9, 7 each with its spec. Per-item references are in `plan.md` Phase 2, "References to follow".
+Bugs the new spec found in the first run, now fixed: `create` stored `now` as `processedAt`, and `hasReference()` read the internal id instead of the provider's id.
+
+Optional leftovers, none blocks phase 3: `from` / `to` as fields on `InvalidTransactionStateError` (phase 5 filter may want them); `ROLLBACKABLE` duplicates `ALLOWED_REFERENCE_KINDS[Rollback]`; the commented-out block at the bottom of `wagerTransaction.ts`; `money.ts` line 23 (`amount.lt(0)`) is only reachable with a `-` amount and has no test; the final negative check in `create` (line ~215) is not covered.
+
+Next: Phase 3 (schema and migration).
 
 ## WagerTransaction stubs: decisions deferred (superseded)
 

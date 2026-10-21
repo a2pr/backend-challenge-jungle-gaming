@@ -117,7 +117,11 @@ Rejected alternative: 200 with `status: REJECTED` in the body (common in wallet 
 | Where | Deviation | Why |
 |---|---|---|
 | `WagerTransaction` | Constructor and state gain `attempts` and `nextAttemptAt`; `markPendingReference` takes `now` | The retry is a domain step (D2, D3) |
+| `WagerTransaction` | Two kinds of wrong call, two kinds of error: request-shaped mistakes (a `BET` with a reference, a zero `BET`, a blank field) throw `InvalidWagerTransactionError` (phase 5 maps it to 400); programming mistakes (`reject(PROCESSING_ERROR)`, `fail` with any other code, `ledgerDirectionFor` on a `LOSS`, `markPendingReference` after the limit) throw a plain `Error` | A bug in the caller must never become a 400 that tells the provider to fix its request |
+| `WagerTransaction` | `State` uses public names (`status`, `failureCode`, ...), not the private `_` ones; `hasReference()` and `checkReference(reference)` added; `checkReference` ignores the reference's status (D18) and "already reversed" (D5), both are the use case's | The phase 3 mapper must not depend on private naming; the status and reversal checks need data |
+| `Money` | `Money.from` rejects negative amounts; negative values only come from `negate` / `subtract` | A negative amount can no longer enter through the API or a mapper by accident |
 | `WagerTransaction` | Observed balance for replays (`balance_after`) is a column, not domain state | The domain does not need it; replays must return the balance seen at that moment (7 rule 7) |
-| `Wallet` | `createdAt` is public as in the skeleton (the working tree currently has `_createdAt`; rename); `open` does not bump `version`; `openingEntry(...)` builds the `OPENING` ledger entry | README: version is 1 after creation, and the create-wallet example shows version 1 with a balance of 1000.00 |
+| `Wallet` | `createdAt` is public as in the skeleton; `open` does not bump `version`; `openingEntry(...)` builds the `OPENING` ledger entry | README: version is 1 after creation, and the create-wallet example shows version 1 with a balance of 1000.00 |
 | Rule 4 | Stricter than the literal text | D5 |
 
+**Known limit: no jitter in backoff.** `backoffMs` is deterministic (`min(base * 2^n, cap)`), so many identical failures retry at the same instant. Not a concern at this scale; add random jitter in the caller if it becomes one.
