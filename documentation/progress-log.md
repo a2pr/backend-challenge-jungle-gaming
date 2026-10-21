@@ -84,9 +84,9 @@ Open: `seq` is not mapped yet (phase 5 pagination). `deployment.md` migration co
 
 Next: Phase 4 (use cases).
 
-## Phase 4: use cases (in progress, steps 0 to 4 done, 2026-10-21)
+## Phase 4: use cases (in progress, steps 0 to 6 done, 2026-10-21)
 
-State: `bun run test` 287+ passed (plus `errors.spec.ts`), `bun run test:e2e` 61 passed (16 repositories, 5 createWallet, 5 submitWagerTransaction, schema, mappers, support, 2 health e2e), `tsc`, `nest build` and lint clean.
+State: `bun run test` 291 passed, `bun run test:e2e` 79 passed (16 repositories, 5 createWallet, 10 submitWagerTransaction, 13 references, schema, mappers, support, 2 health e2e), `tsc`, `nest build` and lint clean.
 
 | Step | State | Detail |
 |---|---|---|
@@ -95,12 +95,16 @@ State: `bun run test` 287+ passed (plus `errors.spec.ts`), `bun run test:e2e` 61
 | 2 Repositories | done | wallet, wager transaction, ledger, outbox (enqueue), inbox; `test/integration/repositories.spec.ts` 16 tests including the lock actually blocking a second locker and a stale-version `save` |
 | 3 `CreateWallet` and modules | done | `CreateWalletUseCase`, `MessagingModule`, `WalletModule`, `@Injectable()` on the repositories; `createWallet.spec.ts` tests 13a to 13d plus a Nest wiring test |
 | 4 `SubmitWagerTransaction`, simple kinds | done | `run` (lock, build, wallet checks, apply, events, persist), `apply` free of I/O for the phase 7 reuse; tests 1 (the 80.00 race, three runs), 6 without references, 9b, unknown wallet, blank `roundId` |
+| 5 Idempotency | done | key lookup (replay with stored `balanceAfter`, `IdempotencyConflictError`), external id lookup (`DuplicateExternalTransactionError`); tests 2 (50 parallel, 1 original and 49 replays), 3, 3b, 4, 5. Review added the missing null `balanceAfter` guard (`tsc` failed) |
+| 6 References and reversals | done | `resolveReference` (pending / rejected / found, `checkReference`, `findReversalOf`) and the branch in `run`; `references.spec.ts`: tests 6, 6b, 7, 7b, 7c, 8, 8b, 9 |
+
+Bugs found on the way (step 6): the first `resolveReference` never returned its computed outcome, so every reversal was applied whatever the reference status (a refund of a rejected bet credited the wallet). Caught in review, fixed, covered by tests 7 and 7b. Lesson: an implicit-`any` local assigned in a `switch` compiles even when nothing reads it.
 
 Bugs found on the way: raw SQL through `em.getConnection().execute(sql, params)` ran outside the transaction (it hung the stale-version test, and would have broken inbox and atomicity silently); fixed by passing `'all', em.getTransactionContext()`. The scaffold caught `DuplicateWalletError` where the ORM throws `UniqueConstraintViolationException`. `domainPurity` treated `wallet.module.ts` as domain code; `module` joined the adapter suffixes.
 
 Decisions (details in `ARCHITECTURE.md`, "Use case wiring"): two modules, no `WagerModule`; unique violation translated after the rollback; wager finders return `balanceAfter`.
 
-Open: `src/wager/wagerTrasanction.repository.ts` has a typo in its name (rename to `wagerTransaction.repository.ts`); the `5s` lock timeout is a guess until step 9; the submit use case file is `SubmitWagerTransaction.usecase.ts` (capital S). Next: step 5 (idempotency).
+Open: `src/wager/wagerTrasanction.repository.ts` has a typo in its name (rename to `wagerTransaction.repository.ts`); the `5s` lock timeout is a guess until step 9; the submit use case file is `SubmitWagerTransaction.usecase.ts` (capital S). Next: step 7 (inbox and atomicity). Also open: unique-violation retry for the cross-wallet same-key race (decision documented, not implemented).
 
 ## WagerTransaction stubs: decisions deferred (superseded)
 

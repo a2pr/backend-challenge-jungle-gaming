@@ -23,6 +23,12 @@ import {WagerTransactionProcessed} from "../events/wagerTransactionProcessed.js"
 import {WagerTransactionRejected} from "../events/wagerTransactionRejected.js";
 import {WagerTransactionPendingReference} from "../events/wagerTransactionPendingReference.js";
 
+type ReferenceOutcome =
+    | { kind: 'none' }                                 // the transaction has no reference
+    | { kind: 'pending' }                              // the reference is unknown or not final yet
+    | { kind: 'rejected'; code: FailureCode }
+    | { kind: 'found'; reference: WagerTransaction };  // PROCESSED and consistent
+
 export interface SubmitWagerCommand {
     providerId: string;
     externalTransactionId: string;
@@ -119,15 +125,21 @@ export class SubmitWagerTransactionUseCase {
             wager.providerId,
             wager.externalTransactionId
         )
-        if(byExternal){
-            throw new DuplicateExternalTransactionError(wager.providerId,wager.externalTransactionId)
+        if (byExternal) {
+            throw new DuplicateExternalTransactionError(wager.providerId, wager.externalTransactionId)
         }
 
 
         let entry: WalletLedgerEntry | undefined
         const walletFailure = this.checkWallet(wallet, wager)
-        if (walletFailure) wager.reject(walletFailure)
-        else entry = this.apply(wallet, wager, undefined, now)
+        if (walletFailure) {
+            wager.reject(walletFailure)
+        } else {
+            const ref = await this.resolveReference(tx, wager)
+            if (ref.kind === 'rejected') wager.reject(ref.code)
+            else if (ref.kind === 'pending') wager.markPendingReference(now)
+            else entry = this.apply(wallet, wager, ref.kind === 'found' ? ref.reference : undefined, now)
+        }
 
         const events = this.buildEvents(wallet, wager, entry, correlationId, causationId, now)
         await this.persist(tx, wallet, wager, entry, events)
@@ -204,5 +216,33 @@ export class SubmitWagerTransactionUseCase {
             balance: balanceAfter.toJSON(),
             idempotentReplay: replay,
         }
+    }
+
+
+    // Reads only. Order of the answers the provider can see: unknown or not final (pending) -> REJECTED/FAILED reference
+    // -> checkReference (provider, player, wallet, currency, round, kind, amount) -> already reversed -> found.
+    private async resolveReference(tx: EntityManager, wager: WagerTransaction): Promise<ReferenceOutcome> {
+        if (!wager.requiresReference() && !wager.hasReference()) return {kind: 'none'}
+        const stored = await this.wagerTransactionRepo.findByExternalId(tx, wager.providerId, wager.referenceExternalTransactionId!)
+        if (!stored) return {kind: 'pending'}
+
+        const reference = stored.transaction
+        switch (reference.status) {
+            case WagerTransactionStatus.Pending:
+            case WagerTransactionStatus.PendingReference:
+                return {kind: 'pending'}
+            case WagerTransactionStatus.Rejected:
+            case WagerTransactionStatus.Failed:
+                return {kind: 'rejected', code: FailureCode.ReferenceNotProcessed}
+        }
+
+        const code = wager.checkReference(reference)
+        if (code) return {kind: 'rejected', code}
+
+        // the wallet lock makes this lookup race-free; wager_one_reversal is the backstop
+        if (wager.requiresReference() && await this.wagerTransactionRepo.findReversalOf(tx, reference.id)) {
+            return {kind: 'rejected', code: FailureCode.AlreadyReversed}
+        }
+        return {kind: 'found', reference}
     }
 }
