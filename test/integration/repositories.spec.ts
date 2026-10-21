@@ -213,6 +213,65 @@ describe('WalletLedgerRepository', () => {
         await assertLedgerMatchesBalance(orm, walletId);
     });
 
+    async function betTwice() {
+        const {walletId, playerId} = await openWallet(orm, '100.00');
+        for (const amount of ['30.00', '20.00']) {
+            const bet = newBet(walletId, playerId, amount);
+            bet.markProcessed(undefined, t0);
+            await inTx(async (em) => {
+                const wallet = (await wallets.lockById(em, walletId))!;
+                await wagers.insert(em, bet, {balanceAfter: wallet.balance.subtract(bet.money).toString()});
+                await ledger.insert(em, wallet.debit(bet.money, {entryId: randomUUID(), transactionId: bet.id, now: t0}));
+                await wallets.save(em, wallet);
+            });
+        }
+        return walletId;
+    }
+
+    it('page walks the entries in seq order, with afterSeq as the cursor', async () => {
+        const walletId = await betTwice();   // OPENING credit, then two debits
+
+        const all = await inTx((em) => ledger.page(em, walletId, 0, 10));
+        expect(all.map((r) => [r.direction, r.amount, r.balanceBefore, r.balanceAfter])).toEqual([
+            ['CREDIT', '100.00', '0.00', '100.00'], ['DEBIT', '30.00', '100.00', '70.00'], ['DEBIT', '20.00', '70.00', '50.00'],
+        ]);
+        expect(all[0].seq).toBeLessThan(all[1].seq);
+
+        const first = await inTx((em) => ledger.page(em, walletId, 0, 1));
+        const rest = await inTx((em) => ledger.page(em, walletId, first[0].seq, 10));
+        expect(first.map((r) => r.id)).toEqual([all[0].id]);
+        expect(rest.map((r) => r.id)).toEqual([all[1].id, all[2].id]);
+        expect(await inTx((em) => ledger.page(em, walletId, all[2].seq, 10))).toEqual([]);
+    });
+
+    it('page never returns another wallet\'s entries', async () => {
+        const walletId = await betTwice();
+        const other = await openWallet(orm, '5.00');
+
+        const rows = await inTx((em) => ledger.page(em, other.walletId, 0, 10));
+
+        expect(rows).toHaveLength(1);
+        expect(rows.every((r) => r.balanceAfter === '5.00')).toBe(true);
+        expect((await inTx((em) => ledger.page(em, walletId, 0, 10))).length).toBe(3);
+    });
+
+    it('reconcile: consistent wallet has a zero difference; a corrupted balance shows a signed difference', async () => {
+        const walletId = await betTwice();
+
+        expect(await inTx((em) => ledger.reconcile(em, walletId)))
+            .toEqual({currency: 'BRL', storedBalance: '50.00', ledgerBalance: '50.00', difference: '0.00', entries: 3});
+
+        await orm.em.getConnection().execute('UPDATE wallets SET balance = ? WHERE id = ?', ['80.00', walletId]);
+        expect(await inTx((em) => ledger.reconcile(em, walletId))).toMatchObject({storedBalance: '80.00', ledgerBalance: '50.00', difference: '30.00'});
+
+        await orm.em.getConnection().execute('UPDATE wallets SET balance = ? WHERE id = ?', ['10.00', walletId]);
+        expect((await inTx((em) => ledger.reconcile(em, walletId)))!.difference).toBe('-40.00');
+    });
+
+    it('reconcile of an unknown wallet is null', async () => {
+        expect(await inTx((em) => ledger.reconcile(em, randomUUID()))).toBeNull();
+    });
+
     it('sumByWallet of an unknown wallet is zero', async () => {
         expect(await inTx((em) => ledger.sumByWallet(em, randomUUID()))).toEqual({ledgerBalance: '0.00', entries: 0});
     });

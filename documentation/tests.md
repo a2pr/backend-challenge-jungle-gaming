@@ -44,3 +44,24 @@ If one run differs, run the failing file alone 20 times (`for i in $(seq 20); do
 | 15 | `test/experiments/contention.spec.ts` |
 
 Current state (2026-10-21): 291 unit, 91 integration and e2e, three green runs in a row.
+
+## HTTP tests and Postman (phase 5)
+
+| Spec | What it covers |
+|---|---|
+| `test/unit/http/toHttp.spec.ts` | the D9 error mapping, `Retry-After`, no message leak |
+| `test/unit/http/money.dto.spec.ts`, `submitTransaction.dto.spec.ts` | request shapes |
+| `test/unit/http/transactionResponse.spec.ts` | status per outcome, `toStoredBody` |
+| `test/unit/http/cursor.spec.ts` | opaque ledger cursor |
+| `test/e2e/wallets.e2e-spec.ts` | create and read wallets |
+| `test/e2e/wagering.e2e-spec.ts` | submit (outcomes, idempotency, races, bad requests, 503) and the two transaction reads |
+| `test/e2e/ledger.e2e-spec.ts` | pagination: 120 entries, an entry between pages, limits, bad cursors |
+| `test/e2e/reconciliation.e2e-spec.ts` | consistent, corrupted (signed difference, error log, no repair), 404 |
+
+The Postman collection (`documentation/postman_collection.json` with `documentation/postman_environment.json`) is the list of every request and error case of the API. Run it against `docker compose up` (the app, after `migration:up`):
+
+```bash
+npx newman run documentation/postman_collection.json -e documentation/postman_environment.json
+```
+
+Each run creates a new player and new external ids, so it can run twice on the same database. It needs the wallet requests first: the Wagering, Reads, Ledger and Reconciliation folders use the `walletId` the Wallets folder stores.
