@@ -10,8 +10,8 @@ export class InsufficientFundsError extends Error{
     }
 }
 export class DuplicateWalletError extends Error{
-    constructor(message:string) {
-        super(message);
+    constructor(public readonly playerId: string, public readonly currency: string) {
+        super(`Wallet already exists for player ${playerId} in ${currency}`);
 
         this.name = "DuplicateWalletError";
         Object.setPrototypeOf(this, DuplicateWalletError.prototype);
