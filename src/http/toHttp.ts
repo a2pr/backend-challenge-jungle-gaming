@@ -54,8 +54,13 @@ export function toHttp(error: unknown): HttpFailure {
         case error instanceof InvalidTransactionStateError:
             return fail(500, 'INVALID_STATE', 'Internal error')       // a bug: logged by the filter, not shown
         case error instanceof HttpException:
-            // Nest's own errors (unknown route, malformed JSON body): keep their status.
-            return fail(error.getStatus(), 'HTTP_ERROR', error.message)
+            // Nest's own errors (unknown route, malformed JSON body, the readiness probe): keep their status and,
+            // when the exception carries an object (the readiness checks), keep it as details for diagnosis.
+            const response = error.getResponse()
+            return {
+                ...fail(error.getStatus(), 'HTTP_ERROR', error.message, error.getStatus() === 503),
+                ...(typeof response === 'object' ? {details: response} : {}),
+            }
         case hasPgCode(error, '55P03'):
         case error instanceof Error:
             // Lock timeout, connection loss, timeouts: transient, the same request can be retried (D9).

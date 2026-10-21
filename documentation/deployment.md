@@ -73,6 +73,7 @@ docker compose exec nest-app bun run migration:down     # reverts the LAST migra
 
 - On the host, `bun run build` first, then `bun run migration:up`. The scripts run under bun (not `node`) on purpose: bun reads `.env` and expands its `${...}` values, while plain `node` sees no `DATABASE_URL` and fails with `No database specified`.
 - Applied migrations are recorded in the `mikro_orm_migrations` table; running `up` twice is a no-op.
+- Inside Compose the app reaches Postgres at host `db`: `docker-compose.yaml` builds `DATABASE_URL` for `nest-app` itself, because `.env` uses `localhost` for commands run from the host (tests, migrations). A fresh database has no tables until `migration:up` runs; until then every wallet request answers 503.
 - `down` drops the tables and data. It exists for development and the `up, down, up` test, not for production rollbacks.
 - Integration tests build their own schema in the `${DATABASE_NAME}_test` database (`bun run test:e2e`), so they never touch the dev database.
 - Migration files are named `Migration<yyyyMMddHHmmss>_<name>.ts`. Keep the timestamp prefix: files are applied in name order.

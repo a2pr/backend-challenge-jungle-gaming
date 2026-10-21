@@ -30,4 +30,11 @@ export class WalletRepository {
         )
         if(updated !==1) throw new Error('Wallet version conflict')
     }
+
+    async findById(em:EntityManager, id: string): Promise<Wallet| null>{
+        let result = await em.findOne(WalletRow, id)
+
+        if (result == null) return null;
+        return toDomain(result)
+    }
 }

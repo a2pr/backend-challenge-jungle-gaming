@@ -17,12 +17,12 @@ import {WagerTransactionKind} from "../wager/wagerTransactionKind.js";
 import {DuplicateWalletError} from "./errors.js";
 import Money from "../money/money.js";
 
-interface CreateWalletCommand {
+export interface CreateWalletCommand {
     playerId: string;
     initialBalance: MoneyProps;
 }
 
-interface CreateWalletResult {
+export interface CreateWalletResult {
     id: string;
     playerId: string;
     balance: MoneyProps;
