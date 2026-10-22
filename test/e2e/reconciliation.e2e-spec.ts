@@ -63,8 +63,8 @@ describe('POST /wallets/:id/reconciliation', () => {
             walletId: wallet.walletId, storedBalance: money('75.50'), calculatedBalance: money('70.00'),
             difference: money('5.50'), consistent: false, checkedEntries: 2,
         });
-        expect(errorLog).toHaveBeenCalledWith(expect.stringContaining(`wallet=${wallet.walletId}`));
-        expect(errorLog).toHaveBeenCalledWith(expect.stringContaining('difference=5.50'));
+        // ids only: README §12 keeps amounts out of the logs (they are in the response body)
+        expect(errorLog).toHaveBeenCalledWith({event: 'reconciliation.mismatch', walletId: wallet.walletId});
         expect(await storedBalance(wallet.walletId)).toEqual(before);                        // never repaired
         expect((await reconcile(wallet.walletId).expect(200)).body.consistent).toBe(false);  // and still reported next time
         const [{n}] = await orm.em.getConnection().execute('SELECT COUNT(*)::int AS n FROM wallet_ledger_entries WHERE wallet_id = ?', [wallet.walletId]);

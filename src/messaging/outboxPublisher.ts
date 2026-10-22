@@ -4,6 +4,8 @@ import {SendMessageCommand, SQSClient} from "@aws-sdk/client-sqs";
 import {OutboxRepository} from "./outbox.repository.js";
 import {SQS_CLIENT} from "./sqs.provider.js";
 import {MESSAGING_CONFIG, type MessagingConfig} from "./messaging.config.js";
+import {MetricsService} from "../observability/metrics.service.js";
+import {errorType, logEvent} from "../observability/logEvent.js";
 
 const BATCH_SIZE = 50;
 
@@ -19,6 +21,8 @@ export class OutboxPublisher implements OnApplicationBootstrap, OnApplicationShu
         private readonly outbox: OutboxRepository,
         @Inject(SQS_CLIENT) private readonly sqs: SQSClient,
         @Inject(MESSAGING_CONFIG) private readonly config: MessagingConfig,
+        // Defaulted so tests that build the publisher by hand keep working; Nest injects the shared one.
+        private readonly metrics: MetricsService = new MetricsService(),
     ) {
     }
 
@@ -36,7 +40,7 @@ export class OutboxPublisher implements OnApplicationBootstrap, OnApplicationShu
     private run(): void {
         if (this.inFlight) return;
         this.inFlight = this.tick()
-            .catch((error) => this.logger.error(`outbox tick failed: ${error}`))
+            .catch((error) => logEvent(this.logger, 'outbox.tick_failed', {errorType: errorType(error)}, 'error'))
             .finally(() => { this.inFlight = undefined; });
     }
 
@@ -60,7 +64,8 @@ export class OutboxPublisher implements OnApplicationBootstrap, OnApplicationShu
                     message.markPublished(now);
                     published++;
                 } catch (error) {
-                    this.logger.warn(`publish of ${message.id} failed: ${error}`);
+                    this.metrics.retries.inc({source: 'outbox'});
+                    logEvent(this.logger, 'outbox.publish_failed', {messageId: message.id, errorType: errorType(error)}, 'warn');
                     message.scheduleRetry(now);   // one bad send must not block the rest of the batch
                     failed++;
                 }

@@ -262,3 +262,33 @@ The timers' "skip the beat while the previous tick runs" only avoids overlap ins
 - Hot wallet throughput does not scale with instances: the row lock serialises one wallet whatever the instance count (contention experiment, D1). More instances help many wallets, not one.
 - Connection budget: `DATABASE_POOL_MAX` times the instance count must stay under Postgres `max_connections` (the multi tests use 10 per instance).
 - `INSTANCE_ID` is not read by the application, so logs cannot yet say which instance handled what.
+
+## Observability [12] (D14)
+
+**Logs.** `main.ts` uses `ConsoleLogger({ json: true })` (Nest 12.2 has the option): one JSON object per line, the event under `message`. Every event goes through `logEvent(logger, name, fields, level)` (`src/observability/logEvent.ts`), whose `LogFields` type is the allow-list: `correlationId`, `messageId`, `transactionId`, `walletId`, `providerId`, `status`, `failureCode`, `source`, `errorType`, `httpStatus`, `method`, `path`. A field outside the list does not compile (`test/unit/logEvent.spec.ts`), so an amount, a balance or a body cannot be logged by accident. Error *messages* are left out on purpose (a driver error can quote values); the error class name is logged instead. The 5xx handler still passes the stack as a second argument.
+
+**Correlation id.** HTTP: `x-correlation-id` or a generated UUID (returned in the response header). Queue: the SQS `MessageId`, stable across redeliveries, so every attempt of one message shares it. It is fixed once in `execute`, so the unique-violation retry, the logs and the events carry the same id.
+
+**Metrics** (`GET /metrics`, public like `/health/*`; one `Registry` per `MetricsService`, `prom-client` is the only new dependency):
+
+| Metric | Type | Labels | Moves when |
+|---|---|---|---|
+| `wager_transactions_total` | counter | `status`, `kind`, `failure_code` | after the commit of a new outcome, also when a pending reference resolves (`reprocess`) and when `recordFailure` stores `FAILED` |
+| `wager_duplicates_total` | counter | - | idempotent replay, duplicate message (inbox), repeated external id |
+| `wager_retries_total` | counter | `source` = `consumer` / `outbox` / `pending_reference` | transient consumer failure, failed outbox send, reference still missing |
+| `wager_dlq_total` | counter | - | consumer sent a message to the DLQ |
+| `wallet_reconciliation_mismatch_total` | counter | - | reconciliation found a difference |
+| `wallet_lock_wait_seconds` | histogram | - | time inside the wallet `FOR UPDATE` only; `lock_timeout` is 5 s, so a timeout lands in the top bucket |
+| `wager_processing_seconds` | histogram | - | one `execute`, unique-violation retry included |
+| `outbox_lag_seconds` | gauge | - | computed on scrape: age of the oldest unpublished row, 0 when empty, `NaN` if the database is unreachable |
+
+| Decision | Chosen | Rejected | Why |
+|---|---|---|---|
+| Where counters move | After the commit, in `execute`/`reprocess`/`recordFailure` | Inside `persist` | A rolled-back attempt (unique-violation retry, lock timeout) must not be counted |
+| Lock contention signal | Histogram of the `lockById` wait | Counting lock errors | The wait is the contention before it becomes an error; a timeout still shows in the top bucket |
+| Outbox lag | Gauge `collect()` on scrape | Updated by the publisher | A stuck publisher cannot update its own gauge, the old row is still there to be seen |
+| Reconciliation log | `walletId` only | Stored and calculated balance in the message (phase 5 did this) | README §12: no financial data in logs; the numbers are in the response body |
+| `MetricsService` as a trailing defaulted constructor argument | `= new MetricsService()` in the use case and publisher | Making it required | Code that builds them by hand keeps working; Nest still injects the shared instance |
+| `IdempotencyConflictError` | Not counted in `wager_duplicates_total` | Counting it | It is a conflicting payload, not a duplicate; it shows as a 409 in the HTTP status logs |
+
+**Not done.** No per-instance label (`INSTANCE_ID` is not read), so a multi-instance scrape needs the scraper to add `instance`; no OpenTelemetry or dashboard (optional in the README); no metric for the consumer's received/acked counts or FIFO group blocking; the ledger-page and read endpoints are not timed.

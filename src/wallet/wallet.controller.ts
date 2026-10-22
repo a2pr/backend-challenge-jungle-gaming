@@ -9,6 +9,8 @@ import {CreateWalletUseCase} from "./createWallet.usecase.js";
 import {WalletRepository} from "./wallet.repository.js";
 import {WalletLedgerRepository} from "./walletLedger.repository.js";
 import {WalletNotFoundError} from "../wager/errors.js";
+import {MetricsService} from "../observability/metrics.service.js";
+import {logEvent} from "../observability/logEvent.js";
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -27,6 +29,7 @@ export class WalletController {
         private readonly createWallet: CreateWalletUseCase,
         private readonly wallets: WalletRepository,
         private readonly ledger: WalletLedgerRepository,
+        private readonly metrics: MetricsService,
     ) {
     }
 
@@ -73,8 +76,9 @@ export class WalletController {
 
         const consistent = r.difference === '0.00'
         if (!consistent) {
-            // phase 9: increment the reconciliation mismatch counter here
-            this.logger.error(`Reconciliation mismatch wallet=${id} stored=${r.storedBalance} calculated=${r.ledgerBalance} difference=${r.difference} ${r.currency}`)
+            // ids only: the stored and calculated balances are in the response body, not in the logs
+            this.metrics.reconciliationMismatch.inc()
+            logEvent(this.logger, 'reconciliation.mismatch', {walletId: id}, 'error')
         }
         const money = (amount: string) => ({amount, currency: r.currency})
         return {

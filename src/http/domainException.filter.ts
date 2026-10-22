@@ -1,6 +1,7 @@
 import {ArgumentsHost, Catch, ExceptionFilter, Logger} from "@nestjs/common";
 import type {Request, Response} from "express";
 import {toHttp} from "./toHttp.js";
+import {logEvent} from "../observability/logEvent.js";
 
 @Catch()
 export class DomainExceptionFilter implements ExceptionFilter {
@@ -12,10 +13,11 @@ export class DomainExceptionFilter implements ExceptionFilter {
         const res = http.getResponse<Response>();
         const {status, code, message, retryable, headers, details} = toHttp(error);
 
-        const correlationId = req.header('x-correlation-id');
-        const line = `${req.method} ${req.url} -> ${status} ${code} correlationId=${correlationId ?? '-'}`;
-        if (status >= 500) this.logger.error(line, error instanceof Error ? error.stack : String(error));
-        else this.logger.warn(line);
+        // the controller sets the header on the response when the caller sent none
+        const correlationId = req.header('x-correlation-id') ?? res.getHeader('x-correlation-id')?.toString();
+        const fields = {correlationId, method: req.method, path: req.path, httpStatus: status, failureCode: code};
+        if (status >= 500) logEvent(this.logger, 'http.error', fields, 'error', error instanceof Error ? error.stack : String(error));
+        else logEvent(this.logger, 'http.error', fields, 'warn');
 
         for (const [name, value] of Object.entries(headers ?? {})) res.setHeader(name, value);
         res.status(status).json({status, code, message, retryable, ...(details === undefined ? {} : {details})});

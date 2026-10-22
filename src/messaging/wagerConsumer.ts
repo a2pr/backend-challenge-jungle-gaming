@@ -8,6 +8,8 @@ import {SQS_CLIENT} from "./sqs.provider.js";
 import {MESSAGING_CONFIG, type MessagingConfig} from "./messaging.config.js";
 import {toCommand, wagerMessageSchema} from "./messageSchema.js";
 import {classify} from "./errorClassification.js";
+import {MetricsService} from "../observability/metrics.service.js";
+import {errorType, logEvent} from "../observability/logEvent.js";
 
 export const CONSUMER_NAME = 'wager-consumer';
 const LONG_POLL_SECONDS = 20;
@@ -27,6 +29,7 @@ export class WagerConsumer implements OnApplicationBootstrap, BeforeApplicationS
         private readonly useCase: SubmitWagerTransactionUseCase,
         @Inject(SQS_CLIENT) private readonly sqs: SQSClient,
         @Inject(MESSAGING_CONFIG) private readonly config: MessagingConfig,
+        private readonly metrics: MetricsService,
     ) {
     }
 
@@ -48,7 +51,7 @@ export class WagerConsumer implements OnApplicationBootstrap, BeforeApplicationS
             try {
                 await this.pollOnce();
             } catch (error) {
-                this.logger.error(`poll failed: ${error}`);
+                logEvent(this.logger, 'consumer.poll_failed', {errorType: errorType(error)}, 'error');
                 await new Promise((resolve) => setTimeout(resolve, ERROR_PAUSE_MS));   // ponytail: delays shutdown by up to 1 s
             }
         }
@@ -99,7 +102,9 @@ export class WagerConsumer implements OnApplicationBootstrap, BeforeApplicationS
             const parsed = wagerMessageSchema.parse(JSON.parse(message.Body ?? ''));
             command = toCommand(parsed);
             // Business rejections and 'duplicate-message' return normally and commit: they are acked, never dead-lettered.
+            // The SQS message id is the correlation id: stable across redeliveries, so every attempt of one message shares it in the logs.
             await this.useCase.execute(command, {
+                correlationId: message.MessageId,
                 inbox: {consumerName: CONSUMER_NAME, messageId: parsed.messageId, payloadHash: payloadHash(command)},
             });
         } catch (error) {
@@ -111,12 +116,13 @@ export class WagerConsumer implements OnApplicationBootstrap, BeforeApplicationS
 
     private async onError(message: Message, command: SubmitWagerCommand | undefined, error: unknown, receiveCount: number): Promise<boolean> {
         if (classify(error) === 'permanent') {
-            this.logger.warn(`message ${message.MessageId} is permanently invalid: ${error}`);
+            logEvent(this.logger, 'consumer.permanent_failure', {...this.ids(message, command), errorType: errorType(error)}, 'warn');
             return this.deadLetter(message, error, receiveCount);
         }
         // >=, never ===: ApproximateReceiveCount is approximate.
         if (receiveCount < this.config.wagerMaxReceiveCount) {
-            this.logger.warn(`message ${message.MessageId} failed (receive ${receiveCount}), will be redelivered: ${error}`);
+            this.metrics.retries.inc({source: 'consumer'});
+            logEvent(this.logger, 'consumer.retry', {...this.ids(message, command), errorType: errorType(error)}, 'warn');
             return false;
         }
         // D8, last receive: audit row first. If it cannot be stored (database down) the message stays and SQS moves it to
@@ -124,7 +130,7 @@ export class WagerConsumer implements OnApplicationBootstrap, BeforeApplicationS
         try {
             if (command) await this.useCase.recordFailure(command);
         } catch (recordError) {
-            this.logger.error(`could not record the failure of ${message.MessageId}: ${recordError}`);
+            logEvent(this.logger, 'consumer.record_failure_failed', {...this.ids(message, command), errorType: errorType(recordError)}, 'error');
             return false;
         }
         return this.deadLetter(message, error, receiveCount);
@@ -146,10 +152,17 @@ export class WagerConsumer implements OnApplicationBootstrap, BeforeApplicationS
                 },
             }));
         } catch (sendError) {
-            this.logger.error(`DLQ send of ${message.MessageId} failed, leaving it in place: ${sendError}`);
+            logEvent(this.logger, 'consumer.dlq_send_failed', {messageId: message.MessageId, errorType: errorType(sendError)}, 'error');
             return false;
         }
+        this.metrics.dlq.inc();
+        logEvent(this.logger, 'consumer.dead_lettered', {messageId: message.MessageId, correlationId: message.MessageId, errorType: errorType(error)}, 'warn');
         return this.remove(message);
+    }
+
+    // Only ids reach the logs (logEvent allow-list); the body, amounts included, never does.
+    private ids(message: Message, command?: SubmitWagerCommand) {
+        return {messageId: message.MessageId, correlationId: message.MessageId, walletId: command?.walletId, providerId: command?.providerId};
     }
 
     private async remove(message: Message): Promise<boolean> {
@@ -157,7 +170,7 @@ export class WagerConsumer implements OnApplicationBootstrap, BeforeApplicationS
             await this.sqs.send(new DeleteMessageCommand({QueueUrl: this.config.wagerQueueUrl, ReceiptHandle: message.ReceiptHandle}));
             return true;
         } catch (error) {
-            this.logger.error(`delete of ${message.MessageId} failed, it will be redelivered: ${error}`);
+            logEvent(this.logger, 'consumer.delete_failed', {messageId: message.MessageId, errorType: errorType(error)}, 'error');
             return false;
         }
     }
@@ -169,7 +182,7 @@ export class WagerConsumer implements OnApplicationBootstrap, BeforeApplicationS
                 QueueUrl: this.config.wagerQueueUrl, ReceiptHandle: message.ReceiptHandle, VisibilityTimeout: 0,
             }));
         } catch (error) {
-            this.logger.warn(`release of ${message.MessageId} failed: ${error}`);
+            logEvent(this.logger, 'consumer.release_failed', {messageId: message.MessageId, errorType: errorType(error)}, 'warn');
         }
     }
 }

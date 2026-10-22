@@ -3,7 +3,9 @@ import Money from "../money/money.js";
 import {WagerTransactionStatus} from "./wagerTransactionStatus.js";
 import {FailureCode} from "./failureCode.js";
 import MoneyProps from "../money/dto/money.props.dto.js";
-import {Injectable} from "@nestjs/common";
+import {Injectable, Logger} from "@nestjs/common";
+import {MetricsService} from "../observability/metrics.service.js";
+import {logEvent} from "../observability/logEvent.js";
 import {MikroORM} from "@mikro-orm/postgresql";
 import {WalletRepository} from "../wallet/wallet.repository.js";
 import {WagerTransactionRepository} from "./wagerTransaction.repository.js";
@@ -75,13 +77,17 @@ const LOCK_TIMEOUT = '5s'
 
 @Injectable()
 export class SubmitWagerTransactionUseCase {
+    private readonly logger = new Logger(SubmitWagerTransactionUseCase.name)
+
     constructor(
         private readonly orm: MikroORM,
         private readonly walletRepo: WalletRepository,
         private readonly wagerTransactionRepo: WagerTransactionRepository,
         private readonly walletLedgerRepo: WalletLedgerRepository,
         private readonly outboxRepo: OutboxRepository,
-        private readonly inboxRepo: InboxRepository
+        private readonly inboxRepo: InboxRepository,
+        // Last and defaulted so code that builds the use case by hand (unit tests) keeps working; Nest injects the shared one.
+        private readonly metrics: MetricsService = new MetricsService(),
     ) {
     }
 
@@ -90,12 +96,44 @@ export class SubmitWagerTransactionUseCase {
     // The catch wraps the whole attempt (not one statement): a failed statement aborts the Postgres transaction.
     // A second violation (another unique index) escapes: one retry, never a loop.
     async execute(command: SubmitWagerCommand, ctx?: SubmitWagerContext): Promise<SubmitWagerOutcome> {
+        // fixed here (not in attempt) so the retry, the logs and the events all carry the same id
+        const withCorrelation = {...ctx, correlationId: ctx?.correlationId ?? randomUUID()}
+        const stopTimer = this.metrics.processing.startTimer()
         try {
-            return await this.attempt(command, ctx)
+            let outcome: SubmitWagerOutcome
+            try {
+                outcome = await this.attempt(command, withCorrelation)
+            } catch (error) {
+                if (!(error instanceof UniqueConstraintViolationException)) throw error
+                outcome = await this.attempt(command, withCorrelation)
+            }
+            this.record(command, outcome, withCorrelation.correlationId)
+            return outcome
         } catch (error) {
-            if (!(error instanceof UniqueConstraintViolationException)) throw error
-            return this.attempt(command, ctx)
+            if (error instanceof DuplicateExternalTransactionError) this.metrics.duplicates.inc()
+            throw error
+        } finally {
+            stopTimer()
         }
+    }
+
+    // After the commit, so a rolled-back attempt is never counted. Replays and duplicates are not new transactions.
+    private record(command: SubmitWagerCommand, outcome: SubmitWagerOutcome, correlationId: string): void {
+        const ids = {correlationId, walletId: command.walletId, providerId: command.providerId}
+        if (outcome.kind === 'duplicate-message') {
+            this.metrics.duplicates.inc()
+            return logEvent(this.logger, 'wager.duplicate_message', ids)
+        }
+        if (outcome.idempotentReplay) {
+            this.metrics.duplicates.inc()
+            return logEvent(this.logger, 'wager.replay', {...ids, transactionId: outcome.transactionId, status: outcome.status})
+        }
+        this.count(command, outcome.status, outcome.failureCode)
+        logEvent(this.logger, `wager.${outcome.status.toLowerCase()}`, {...ids, transactionId: outcome.transactionId, status: outcome.status, failureCode: outcome.failureCode})
+    }
+
+    private count(command: { kind: string }, status: string, failureCode?: string): void {
+        this.metrics.transactions.inc({status, kind: command.kind, failure_code: failureCode ?? 'none'})
     }
 
     private attempt(command: SubmitWagerCommand, ctx?: SubmitWagerContext): Promise<SubmitWagerOutcome> {
@@ -170,7 +208,13 @@ export class SubmitWagerTransactionUseCase {
     private async lockWallet(tx: EntityManager, walletId: string): Promise<Wallet | null> {
         // Raw SQL: pass the transaction context or it runs on another connection.
         await tx.getConnection().execute(`SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'`, [], 'run', tx.getTransactionContext())
-        return this.walletRepo.lockById(tx, walletId)
+        // Only the wait for the row lock is timed, not the business work: this histogram is the contention signal (a timeout lands in the top bucket).
+        const stopTimer = this.metrics.lockWait.startTimer()
+        try {
+            return await this.walletRepo.lockById(tx, walletId)
+        } finally {
+            stopTimer()
+        }
     }
 
     // The one place that decides a transaction's outcome, shared by execute and reprocess (HTTP, queue and worker cannot drift).
@@ -296,6 +340,7 @@ export class SubmitWagerTransactionUseCase {
     // D8: a well-formed message failed on its last receive. Own transaction, after the first one rolled back, so it only
     // sees committed state. Evidence only: no ledger entry, no event. Unknown wallet: nothing (that message is permanent).
     async recordFailure(command: SubmitWagerCommand, failureCode: FailureCode = FailureCode.ProcessingError): Promise<void> {
+        let recorded = false
         await this.orm.em.fork().transactional(async (tx) => {
             const wallet = await this.lockWallet(tx, command.walletId)
             if (!wallet) return
@@ -306,7 +351,12 @@ export class SubmitWagerTransactionUseCase {
             const wager = this.buildTransaction(command, randomUUID(), new Date())
             wager.fail(failureCode)
             await this.wagerTransactionRepo.insert(tx, wager, {balanceAfter: wallet.balance.toString()})
+            recorded = true
         })
+        if (recorded) {
+            this.count(command, WagerTransactionStatus.Failed, failureCode)
+            logEvent(this.logger, 'wager.failed', {walletId: command.walletId, providerId: command.providerId, status: WagerTransactionStatus.Failed, failureCode}, 'warn')
+        }
     }
 
     // D3, D18: re-run a PENDING_REFERENCE transaction whose reference may have arrived. One transaction per row.
@@ -315,6 +365,7 @@ export class SubmitWagerTransactionUseCase {
         const peek = await this.wagerTransactionRepo.findById(this.orm.em.fork(), transactionId)
         if (!peek) return
 
+        let resolved: WagerTransaction | undefined
         await this.orm.em.fork().transactional(async (tx) => {
             const wallet = await this.lockWallet(tx, peek.transaction.walletId)
             if (!wallet) return
@@ -328,6 +379,15 @@ export class SubmitWagerTransactionUseCase {
             const events = wager.status === WagerTransactionStatus.PendingReference ? []
                 : this.buildEvents(wallet, wager, entry, randomUUID(), undefined, now)
             await this.persist(tx, wallet, wager, entry, events, true)
+            resolved = wager
         })
+        if (!resolved) return
+        const ids = {transactionId: resolved.id, walletId: resolved.walletId, providerId: resolved.providerId, status: resolved.status}
+        if (resolved.status === WagerTransactionStatus.PendingReference) {
+            this.metrics.retries.inc({source: 'pending_reference'})   // still waiting for its reference: another attempt is scheduled
+            return logEvent(this.logger, 'wager.pending_reference_retry', ids)
+        }
+        this.count(resolved, resolved.status, resolved.failureCode)
+        logEvent(this.logger, `wager.${resolved.status.toLowerCase()}`, {...ids, failureCode: resolved.failureCode})
     }
 }

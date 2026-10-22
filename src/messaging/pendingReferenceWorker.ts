@@ -3,6 +3,7 @@ import {MikroORM} from "@mikro-orm/postgresql";
 import {SubmitWagerTransactionUseCase} from "../wager/SubmitWagerTransaction.usecase.js";
 import {WagerTransactionRepository} from "../wager/wagerTransaction.repository.js";
 import {MESSAGING_CONFIG, type MessagingConfig} from "./messaging.config.js";
+import {errorType, logEvent} from "../observability/logEvent.js";
 
 const BATCH_SIZE = 50;
 
@@ -35,7 +36,7 @@ export class PendingReferenceWorker implements OnApplicationBootstrap, BeforeApp
     private run(): void {
         if (this.inFlight) return;
         this.inFlight = this.tick()
-            .catch((error) => this.logger.error(`pending-reference tick failed: ${error}`))
+            .catch((error) => logEvent(this.logger, 'pending_reference.tick_failed', {errorType: errorType(error)}, 'error'))
             .finally(() => { this.inFlight = undefined; });
     }
 
@@ -50,7 +51,7 @@ export class PendingReferenceWorker implements OnApplicationBootstrap, BeforeApp
                 await this.useCase.reprocess(id, now);
                 reprocessed++;
             } catch (error) {
-                this.logger.warn(`reprocess of ${id} failed: ${error}`);    // one bad row must not block the rest
+                logEvent(this.logger, 'pending_reference.reprocess_failed', {transactionId: id, source: 'pending_reference', errorType: errorType(error)}, 'warn');    // one bad row must not block the rest
                 failed++;
             }
         }

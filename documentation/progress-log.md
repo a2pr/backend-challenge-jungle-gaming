@@ -236,6 +236,33 @@ Open items:
 - Kill and `SIGTERM` timing is by database state, not by code line; which message the victim held is not controlled.
 - Single machine, single Postgres.
 
+## Phase 9: observability (done 2026-10-22)
+
+State: `bun run test` 429, `bun run test:e2e` 223, `bun run test:multi` 8; `tsc`, build and lint clean. One production dependency added: `prom-client`.
+
+| Step | State | Detail |
+|---|---|---|
+| 0 `MetricsService`, `/metrics` | done | `src/observability/` (`metrics.service.ts`, `metrics.controller.ts`, `observability.module.ts`, global); all names from the phase contract |
+| 1 Instrumentation | done | `execute` (counters after commit, processing histogram, duplicates), `lockWallet` (lock-wait histogram), `reprocess`/`recordFailure`, consumer (retries, DLQ), publisher (retries), reconciliation |
+| 2 Outbox lag gauge | done | `collect()` on scrape; e2e test shows it grows with workers off |
+| 3 JSON logs | done | `ConsoleLogger({ json: true })`, `logEvent` with a typed allow-list, consumer passes the SQS `MessageId` as correlation id; every `logger.*(\`...${error}\`)` replaced |
+| 4 Tests | done | `test/e2e/metrics.e2e-spec.ts` (names, processed/rejected/replay counters, histograms count, lag gauge), `test/unit/logEvent.spec.ts` |
+
+Checked by hand on the compose app: three requests with `x-correlation-id: abc` (processed, replay, rejected) gave three JSON lines with `"correlationId":"abc"`, ids and status only, and the matching counters on `/metrics`.
+
+Differences from the phase document:
+- `logEvent` takes a `level` (and an optional stack) because the call sites are warnings and errors as well as info.
+- The allow-list gained `errorType`, `httpStatus`, `method`, `path` (error class name, HTTP error log), and no error message at all.
+- The reconciliation e2e test no longer expects balances in the log (they were in the phase 5 log line); it expects `{event: 'reconciliation.mismatch', walletId}`.
+- `wager_duplicates_total` also counts `DuplicateExternalTransactionError`.
+- The compose container needs `docker compose up -d --build -V nest-app` after `bun add` (anonymous `node_modules` volume).
+
+Decisions: see "Observability" in `ARCHITECTURE.md`.
+
+Open items:
+- No `instance` label; `INSTANCE_ID` is unused.
+- Consumer received/acked counts and the 5xx stack in JSON mode were not checked beyond the unit test.
+
 ## WagerTransaction stubs: decisions deferred (superseded)
 
 **Superseded 2026-10-20:** every point below was decided (D1 to D11, D17, D18) and is written in `ARCHITECTURE.md` and `plan.md`. Kept only as history; delete when convenient. Original text:

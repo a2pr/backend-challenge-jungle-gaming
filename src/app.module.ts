@@ -5,9 +5,10 @@ import { HealthController } from './health.controller.js';
 import { HealthService } from './health.service.js';
 import { MessagingModule } from './messaging/messaging.module.js';
 import { WalletModule } from './wallet/wallet.module.js';
+import { ObservabilityModule } from './observability/observability.module.js';
 
 @Module({
-  imports: [MikroOrmModule.forRoot(config), MessagingModule, WalletModule],
+  imports: [MikroOrmModule.forRoot(config), ObservabilityModule, MessagingModule, WalletModule],
   controllers: [ HealthController],
   providers: [ HealthService],
 })

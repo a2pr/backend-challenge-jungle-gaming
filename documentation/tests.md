@@ -49,8 +49,10 @@ If one run differs, run the failing file alone 20 times (`for i in $(seq 20); do
 | `recordFailure`, `reprocess`, `findDuePendingReference` | `test/integration/recordFailureReprocess.spec.ts` |
 | pending-reference worker: out of order, D3 timeline, concurrent ticks | `test/integration/pendingReference.spec.ts` |
 | readiness reads the queue | `test/e2e/health.e2e-spec.ts` |
+| `/metrics`: names, counters, histograms, outbox lag gauge | `test/e2e/metrics.e2e-spec.ts` |
+| log allow-list (`logEvent`) | `test/unit/logEvent.spec.ts` |
 
-Current state (2026-10-21): 427 unit, 220 integration and e2e, 8 multi-instance, three green runs in a row of each.
+Current state (2026-10-22): 429 unit, 223 integration and e2e, 8 multi-instance, green runs of each.
 
 The outbox tests create uniquely named throwaway queues with a 2 s visibility timeout (`test/support/sqs.ts`), never the compose queues, and `vitest.config.e2e.ts` sets `WORKERS_ENABLED=false` so booting the app in a test does not start the publisher timer.
 
