@@ -24,7 +24,8 @@
     "migration:down": "bun dist/migrate.js down",
     "migration:status": "bun dist/migrate.js status",
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
-    "test:multi": "vitest run --config ./vitest.config.multi.ts"
+    "test:multi": "vitest run --config ./vitest.config.multi.ts",
+    "test:load": "bun test/load/run.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sqs": "^3.1153.0",
@@ -46,10 +47,12 @@
     "@nestjs/mau": "^0.2.6",
     "@nestjs/schematics": "^12.0.0",
     "@nestjs/testing": "^12.0.1",
+    "@types/autocannon": "^7.12.7",
     "@types/express": "^5.0.0",
     "@types/node": "^24.0.0",
     "@types/supertest": "^7.2.1",
     "@vitest/coverage-v8": "^5.0.5",
+    "autocannon": "^8.0.0",
     "oxlint": "^1.58.0",
     "prettier": "^3.4.2",
     "source-map-support": "^0.5.21",

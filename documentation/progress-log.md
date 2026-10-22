@@ -285,6 +285,12 @@ Not run: the dry run was on the same machine and the same Docker daemon, so it d
 
 `main.ts` logs `{"event":"app.started","instanceId":...,"port":...}` once, after `listen`. `instanceId` is `INSTANCE_ID` or the hostname. Every JSON line already has `pid`, so the startup line is the key that attributes the rest. `LogFields` gained `instanceId` and `port`; `multi/smoke.spec.ts` asserts each child logs its own id. Not done: the id on every line, or as a metric label.
 
+## Extras (2026-10-22)
+
+- **Retry counters at 0:** the three `wager_retries_total` sources are exported from start (`MetricsService` constructor), tested in `metrics.e2e-spec.ts`.
+- **Instance id everywhere:** `src/observability/instance.ts`; `logEvent` adds `instanceId` to every line, the registry adds the `instance_id` label to every metric (not `instance`, which Prometheus owns). `app.started` logs it with the port. The two log-shape tests were updated.
+- **Load test:** `bun run test:load` (`test/load/run.ts`, `autocannon` and `@types/autocannon` as dev dependencies), results and analysis in `load-test.md`. Finding: the outbox publisher's ceiling is about 50 events/s (one batch of 50 per tick), so the sustainable rate is about 25 tx/s; the HTTP path itself did 240-270 req/s on one hot wallet and 440-470 over 200 wallets with 0 errors and the ledger invariant intact. Recorded as a limitation with ways up; the publisher was not changed.
+
 ## Known issues and risks
 
 - `DATABASE_URL` is read by MikroORM only; `bun` expands the `${...}` values of `.env`, plain `node` does not (see `deployment.md`, migrations).

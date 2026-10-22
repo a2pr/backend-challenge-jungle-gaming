@@ -273,7 +273,6 @@ The timers' "skip the beat while the previous tick runs" only avoids overlap ins
 - Postgres failover and SQS regional failure: out of scope for the challenge (README §2).
 - Hot wallet throughput does not scale with instances: the row lock serialises one wallet whatever the instance count (contention experiment, D1). More instances help many wallets, not one.
 - Connection budget: `DATABASE_POOL_MAX` times the instance count must stay under Postgres `max_connections` (the multi tests use 10 per instance).
-- `INSTANCE_ID` appears only in the `app.started` line (with the port); the `pid` on every line ties the rest to it. The id is not repeated on each line.
 
 ## Observability [12] (D14)
 
@@ -281,7 +280,9 @@ The timers' "skip the beat while the previous tick runs" only avoids overlap ins
 
 **Correlation id.** HTTP: `x-correlation-id` or a generated UUID (returned in the response header). Queue: the SQS `MessageId`, stable across redeliveries, so every attempt of one message shares it. It is fixed once in `execute`, so the unique-violation retry, the logs and the events carry the same id.
 
-**Metrics** (`GET /metrics`, public like `/health/*`; one `Registry` per `MetricsService`, `prom-client` is the only new dependency):
+**Instance id.** `INSTANCE_ID` (default: the hostname, the container id in Compose) is read once in `src/observability/instance.ts`. `logEvent` puts it on every log line as `instanceId`, and the registry's default labels put it on every metric as `instance_id` (not `instance`, which Prometheus adds itself and would rename to `exported_instance`). `app.started` logs it with the port once at boot.
+
+**Metrics** (`GET /metrics`, public like `/health/*`; one `Registry` per `MetricsService`, `prom-client` is the only new dependency; the three `wager_retries_total` sources are exported at 0 so `rate()` sees the first retry):
 
 | Metric | Type | Labels | Moves when |
 |---|---|---|---|
@@ -303,7 +304,7 @@ The timers' "skip the beat while the previous tick runs" only avoids overlap ins
 | `MetricsService` as a trailing defaulted constructor argument | `= new MetricsService()` in the use case and publisher | Making it required | Code that builds them by hand keeps working; Nest still injects the shared instance |
 | `IdempotencyConflictError` | Not counted in `wager_duplicates_total` | Counting it | It is a conflicting payload, not a duplicate; it shows as a 409 in the HTTP status logs |
 
-**Not done.** No per-instance metric label (`INSTANCE_ID` is only in the startup log line), so a multi-instance scrape needs the scraper to add `instance`; no OpenTelemetry or dashboard (optional in the README); no metric for the consumer's received/acked counts or FIFO group blocking; the ledger-page and read endpoints are not timed.
+**Not done.** no OpenTelemetry or dashboard (optional in the README); no metric for the consumer's received/acked counts or FIFO group blocking; the ledger-page and read endpoints are not timed.
 
 ## Concurrency walkthrough: the README §8 scenario
 
@@ -330,6 +331,7 @@ Stated as limitations, each with its ceiling and the way up.
 | **No authentication** (D15): `playerId` and `providerId` are trusted as sent | anyone who reaches the port can move money | replace `AuthGuard` with a JWT/OIDC guard (`{provide: AuthGuard, useClass}`); derive the provider from the token |
 | One hot wallet is serialised by its row lock | measured 200-260 bets/s on one wallet, versus 550 on 200 wallets | partition a hot wallet into sub-balances, or queue per wallet and batch |
 | `DATABASE_POOL_MAX` times the instance count must stay below `max_connections` | pool 200 failed 100 calls (`too many clients`) | PgBouncer, or smaller pools |
+| **The outbox publisher sends at most 50 events per 1 s tick (about 50/s; a `BET` writes 2 events)**, measured in `load-test.md` | sustained load above about 25 tx/s grows the backlog; 15 s of load at 240-470 tx/s took 143-313 s to drain. Nothing is lost, events are late | loop while batches are full, `SendMessageBatch` (10 per call), shorter poll, more instances (`SKIP LOCKED` divides the rows) |
 | The outbox publisher calls SQS while holding up to 50 row locks | a slow SQS holds those rows and one connection | claim-then-publish with a lease column and a reaper |
 | The consumer handles a batch sequentially | one message at a time per instance | add instances (wallets run in parallel); parallelise across `MessageGroupId` |
 | FIFO head-of-line blocking: a poison message delays its wallet until it reaches the DLQ | about 2 minutes (5 receives x 30 s visibility) | lower `maxReceiveCount` or visibility timeout |
@@ -343,13 +345,12 @@ Stated as limitations, each with its ceiling and the way up.
 | The observed balance (`balance_after`) is persistence-only; the retry state adds two fields (`attempts`, `nextAttemptAt`) to the README `WagerTransaction` constructor | deviation from the skeleton | listed under "Deviations from the README skeletons" |
 | LocalStack pinned to 4.4 (newer tags need an auth token), Postgres 13 near end of life | no security patches | real SQS and a supported Postgres major |
 | Tests ran on one machine against one Postgres | shows correctness across processes, not across hosts or partitions | repeat `test:multi` against a staging cluster |
-| The instance id is only in the `app.started` log line; metrics have no instance label | attributing a line needs the `pid` join | add the id to every line and as a scrape label |
 
 ## Considered, not implemented
 
 The project asks for these to be named even when not built.
 
-- **Load test** (`bun run test:load`): the contention experiment (D1) measures one process; a load test through HTTP with p50/p95/p99 and outbox lag would measure the system.
+- **Load test across several instances and a production build**: `bun run test:load` exists (`load-test.md`) but targets one running app, in the dev container, on the happy path only.
 - **Repository interfaces and in-memory adapters** (ports): D11 chose concrete repositories behind pure mappers; the hexagonal boundary is the domain/mapper split, not interfaces. Cost of adding: about a day, and the integration tests would still be needed.
 - **Outbox lease and reaper**, instead of holding locks while publishing.
 - **Retention jobs** for inbox, outbox and old ledger partitions.

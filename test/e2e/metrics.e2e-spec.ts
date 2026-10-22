@@ -20,8 +20,10 @@ afterAll(() => app.close());
 beforeEach(() => truncateAll(orm));
 
 const scrape = async () => (await http.get('/metrics').expect(200)).text;
+// every series carries instance_id (the scraper-independent instance name); samples are matched without it
+const withoutInstance = (text: string) => text.replace(/,?instance_id="[^"]*"/g, '').replace(/\{\}/g, '');
 // value of one sample line, e.g. sample(text, 'wager_transactions_total{status="PROCESSED",kind="BET",failure_code="none"}')
-const sample = (text: string, series: string) => Number(text.match(new RegExp(`^${series.replace(/[{}"]/g, '\\$&')} (\\S+)$`, 'm'))?.[1] ?? 0);
+const sample = (raw: string, series: string) => Number(withoutInstance(raw).match(new RegExp(`^${series.replace(/[{}"]/g, '\\$&')} (\\S+)$`, 'm'))?.[1] ?? 0);
 const bet = (w: { walletId: string; playerId: string }, key = randomUUID()) =>
     http.post('/wagering/transactions').set('Idempotency-Key', key).send({
         providerId: 'prov-1', externalTransactionId: `ext-${key}`, playerId: w.playerId, walletId: w.walletId, roundId: 'r', gameId: 'g',
@@ -35,6 +37,15 @@ describe('GET /metrics', () => {
         for (const name of ['wager_transactions_total', 'wager_duplicates_total', 'wager_retries_total', 'wager_dlq_total',
             'wallet_reconciliation_mismatch_total', 'wallet_lock_wait_seconds', 'wager_processing_seconds', 'outbox_lag_seconds']) {
             expect(text, name).toContain(`# TYPE ${name} `);
+        }
+    });
+
+    it('every series carries instance_id, and the retry sources start at 0', async () => {
+        const text = await scrape();
+
+        expect(text).toMatch(/^wager_dlq_total\{instance_id="[^"]+"\} \d+$/m);
+        for (const source of ['consumer', 'outbox', 'pending_reference']) {
+            expect(text, source).toMatch(new RegExp(`^wager_retries_total\\{source="${source}",instance_id="[^"]+"\\} \\d+$`, 'm'));
         }
     });
 

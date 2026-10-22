@@ -5,6 +5,7 @@ import {afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi} fr
 import {createTestApp} from '../support/app.js';
 import {resetSchema, truncateAll} from '../support/db.js';
 import {openWallet} from '../support/fixtures.js';
+import {INSTANCE_ID} from '../../src/observability/instance.js';
 
 let app: INestApplication;
 let http: Awaited<ReturnType<typeof createTestApp>>['http'];
@@ -64,7 +65,7 @@ describe('POST /wallets/:id/reconciliation', () => {
             difference: money('5.50'), consistent: false, checkedEntries: 2,
         });
         // ids only: README §12 keeps amounts out of the logs (they are in the response body)
-        expect(errorLog).toHaveBeenCalledWith({event: 'reconciliation.mismatch', walletId: wallet.walletId});
+        expect(errorLog).toHaveBeenCalledWith({event: 'reconciliation.mismatch', instanceId: INSTANCE_ID, walletId: wallet.walletId});
         expect(await storedBalance(wallet.walletId)).toEqual(before);                        // never repaired
         expect((await reconcile(wallet.walletId).expect(200)).body.consistent).toBe(false);  // and still reported next time
         const [{n}] = await orm.em.getConnection().execute('SELECT COUNT(*)::int AS n FROM wallet_ledger_entries WHERE wallet_id = ?', [wallet.walletId]);

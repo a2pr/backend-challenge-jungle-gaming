@@ -7,6 +7,7 @@ Three vitest configs (unit, integration/e2e, multi-instance), one database. `bun
 | `bun run test` | unit specs: `src/**/*.spec.ts`, `test/unit/**` (domain, events, errors, domain purity) | nothing |
 | `bun run test:e2e` | `test/integration/**` and `test/e2e/**` against real Postgres and LocalStack | `docker compose up -d db localstack` (wait until LocalStack is `healthy`) and `DATABASE_URL_TEST`, `AWS_*` and the queue URLs in `.env` (see `.env.example`) |
 | `bun run test:multi` | `test/integration/multi/**`: 3 real `node dist/main.js` processes sharing one database and one queue (HTTP race, consumers, publishers, `SIGKILL` restart, `SIGTERM`); builds `dist/` first if it is stale | `docker compose up -d db localstack` only, see "Multi-instance tests" below |
+| `bun run test:load` | `test/load/run.ts` (autocannon) against the **running** app (`LOAD_URL`, default `http://localhost:3000`): hot wallet and many wallets; prints latency percentiles, error rate, lock-wait quantiles from `/metrics` and outbox lag; **not** part of the suite | the Compose stack up and migrated. It writes wallets and transactions into that app's database: `docker compose down -v` resets it. Knobs: `LOAD_DURATION` (15 s), `LOAD_CONNECTIONS` (50), `LOAD_WALLETS` (200). Results and method: `load-test.md` |
 | `bunx vitest run --config ./vitest.config.experiments.ts` | `test/experiments/**`: the contention experiment (D1), prints a markdown table; **not** part of the suite | same as e2e |
 | `bunx tsc --noEmit`, `bunx oxlint src/ test/`, `bun run build` | types, lint, compile | nothing |
 
@@ -94,7 +95,7 @@ Every scenario ends with `waitForSettled` (`test/support/multi.ts`): stored coun
 **The tests can fail.** The HTTP race was checked by removing the wallet lock on a local branch (`lockMode: PESSIMISTIC_WRITE` in `wallet.repository.ts`): both HTTP tests failed (3 `PROCESSED` instead of 10, 503 for the same-key replays). The sabotage was reverted, never committed.
 
 **Limits.**
-- The application logs `app.started` with its `INSTANCE_ID` (default: the hostname) and port, and every JSON line carries `pid`, so a failing test's output can be attributed to an instance. Log lines do not carry the instance id themselves, so the tests still cannot assert that every instance did a share of the work, only that the combined result is right.
+- Every app log line carries `instanceId` (`INSTANCE_ID`, default the hostname) and `pid`, so a failing test's output is attributable to an instance. The tests still do not assert that every instance did a share of the work, only that the combined result is right.
 - The kill and the `SIGTERM` land "after 30 rows", not at a chosen line of code. Messages in flight at that moment make it a real redelivery test, but which message the victim held is not controlled. The assertions hold for any timing.
 - Same machine, same Postgres: this shows correctness across processes, not across hosts or network partitions.
 

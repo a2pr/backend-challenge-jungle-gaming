@@ -1,11 +1,13 @@
 import {Injectable, Optional} from "@nestjs/common";
 import {MikroORM} from "@mikro-orm/postgresql";
 import {Counter, Gauge, Histogram, Registry} from "prom-client";
+import {INSTANCE_ID} from "./instance.js";
 
 // Labels are status, kind, failure code and source only: never a wallet or transaction id (cardinality).
 // One registry per instance of this class, not prom-client's global one, so tests that build several never clash.
 @Injectable()
 export class MetricsService {
+    // `instance_id` on every series: a scrape of several instances stays attributable. Not `instance`, which Prometheus adds itself.
     private readonly registry = new Registry();
 
     readonly transactions = new Counter({
@@ -36,6 +38,9 @@ export class MetricsService {
 
     // Without an ORM (unit tests that build the services by hand) there is simply no lag gauge.
     constructor(@Optional() orm?: MikroORM) {
+        this.registry.setDefaultLabels({instance_id: INSTANCE_ID});
+        // A labelled counter has no series until its first inc(); starting the known sources at 0 lets rate() see the first retry.
+        for (const source of ['consumer', 'outbox', 'pending_reference']) this.retries.inc({source}, 0);
         if (!orm) return;
         // Computed on scrape: a stuck publisher cannot update its own gauge, but the old row is still there to be seen.
         new Gauge({

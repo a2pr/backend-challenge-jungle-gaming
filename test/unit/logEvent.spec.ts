@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {logEvent} from '../../src/observability/logEvent.js';
+import {INSTANCE_ID} from '../../src/observability/instance.js';
 
 const fakeLogger = () => {
     const lines: { level: string; message: any }[] = [];
@@ -8,15 +9,15 @@ const fakeLogger = () => {
 };
 
 describe('logEvent', () => {
-    it('writes the event name and the ids, at the level asked', () => {
+    it('writes the event name, the instance id and the ids, at the level asked', () => {
         const {lines, logger} = fakeLogger();
 
         logEvent(logger, 'wager.processed', {correlationId: 'abc', walletId: 'w1', transactionId: 't1', providerId: 'p1', status: 'PROCESSED'});
         logEvent(logger, 'consumer.retry', {messageId: 'm1'}, 'warn');
 
         expect(lines).toEqual([
-            {level: 'log', message: {event: 'wager.processed', correlationId: 'abc', walletId: 'w1', transactionId: 't1', providerId: 'p1', status: 'PROCESSED'}},
-            {level: 'warn', message: {event: 'consumer.retry', messageId: 'm1'}},
+            {level: 'log', message: {event: 'wager.processed', instanceId: INSTANCE_ID, correlationId: 'abc', walletId: 'w1', transactionId: 't1', providerId: 'p1', status: 'PROCESSED'}},
+            {level: 'warn', message: {event: 'consumer.retry', instanceId: INSTANCE_ID, messageId: 'm1'}},
         ]);
     });
 

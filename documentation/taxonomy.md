@@ -86,18 +86,18 @@ Inbound message (`src/messaging/messageSchema.ts`): `{messageId, type: "WagerTra
 
 ## Metrics (`src/observability/metrics.service.ts`)
 
-`wager_transactions_total{status,kind,failure_code}`, `wager_duplicates_total`, `wager_retries_total{source=consumer|outbox|pending_reference}`, `wager_dlq_total`, `wallet_reconciliation_mismatch_total`, `wallet_lock_wait_seconds` (histogram), `wager_processing_seconds` (histogram), `outbox_lag_seconds` (gauge). Meaning of each: `ARCHITECTURE.md`, "Observability".
+`wager_transactions_total{status,kind,failure_code}`, `wager_duplicates_total`, `wager_retries_total{source=consumer|outbox|pending_reference}`, `wager_dlq_total`, `wallet_reconciliation_mismatch_total`, `wallet_lock_wait_seconds` (histogram), `wager_processing_seconds` (histogram), `outbox_lag_seconds` (gauge). Every series carries the label `instance_id` (same value as `instanceId` in the logs; not `instance`, which the scraper adds). The three `wager_retries_total` sources are exported at 0 from start. Meaning of each: `ARCHITECTURE.md`, "Observability".
 
 ## Log events (`src/observability/logEvent.ts`)
 
-JSON lines, event name under `message.event`. Fields allowed: `correlationId`, `messageId`, `transactionId`, `walletId`, `providerId`, `status`, `failureCode`, `source`, `errorType`, `httpStatus`, `method`, `path`, `instanceId`, `port`.
+JSON lines, event name under `message.event`. Fields allowed: `correlationId`, `messageId`, `transactionId`, `walletId`, `providerId`, `status`, `failureCode`, `source`, `errorType`, `httpStatus`, `method`, `path`, `port`. `logEvent` adds `instanceId` (from `INSTANCE_ID`, default the hostname) to every line by itself.
 
 | Group | Events |
 |---|---|
 | use case | `wager.processed`, `wager.rejected`, `wager.pending_reference`, `wager.failed`, `wager.replay`, `wager.duplicate_message`, `wager.pending_reference_retry` |
 | consumer | `consumer.retry`, `consumer.permanent_failure`, `consumer.dead_lettered`, `consumer.poll_failed`, `consumer.record_failure_failed`, `consumer.dlq_send_failed`, `consumer.delete_failed`, `consumer.release_failed` |
 | workers | `outbox.publish_failed`, `outbox.tick_failed`, `pending_reference.reprocess_failed`, `pending_reference.tick_failed` |
-| other | `app.started` (instance id and port, once), `http.error`, `reconciliation.mismatch` |
+| other | `app.started` (port, once), `http.error`, `reconciliation.mismatch` |
 
 ## Database tables (`src/migrations/`)
 

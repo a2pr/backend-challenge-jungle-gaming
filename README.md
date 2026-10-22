@@ -19,6 +19,7 @@ curl localhost:3000/metrics                           # Prometheus text
 bun run test                                          # unit tests, no infrastructure
 bun run test:e2e                                      # integration + HTTP against real Postgres and LocalStack
 bun run test:multi                                    # 3 real processes on one database and queue (builds dist/ if stale)
+bun run test:load                                     # load test against the running app on :3000; writes data, see documentation/load-test.md
 ```
 
 `test:e2e` and `test:multi` need the Compose services running (`docker compose up -d db localstack` is enough) and use a separate `<name>_test` database and throwaway queues, never the dev data.
@@ -30,6 +31,7 @@ bun run test:multi                                    # 3 real processes on one 
 | [`documentation/deployment.md`](documentation/deployment.md) | environment variables, migrations, running several instances, operations |
 | [`documentation/taxonomy.md`](documentation/taxonomy.md) | failure codes, HTTP errors, events, queues, metrics, log events |
 | [`documentation/postman_collection.json`](documentation/postman_collection.json) + `postman_environment.json` | every endpoint and every error case; import both, base URL `http://localhost:3000` |
+| [`documentation/load-test.md`](documentation/load-test.md) | load test method, figures, and what they show about the limits |
 | [`documentation/progress-log.md`](documentation/progress-log.md) | final status against the scoring table, per-phase notes |
 
 ---
