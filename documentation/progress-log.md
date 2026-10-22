@@ -1,19 +1,32 @@
 # Progress log
 
-Status against the README (`README.md`, section numbers in brackets). Updated 2026-10-21.
+Status against the README (`README.md`, section numbers in brackets). Final status table first, per-phase notes after. Updated 2026-10-22.
 
-## Done
+## Final status (2026-10-22)
+
+| README area (weight) | State | Where it is shown |
+|---|---|---|
+| Financial correctness (20) | done: `Money` on decimal.js, append-only ledger, all kinds and reversals, reconciliation endpoint | phases 2 to 5, `ARCHITECTURE.md` |
+| Concurrency (20) | done: wallet `FOR UPDATE`, hot-wallet tests, 3 real processes, `SIGKILL` and `SIGTERM` | phases 4 and 8, `test:multi` |
+| Idempotency (15) | done: persistent keys, replay, payload conflict, cross-channel | phase 4, `http.spec.ts`, `consumer.spec.ts` |
+| Messaging and failures (15) | done: inbox, outbox, retry, DLQ, crash recovery, graceful shutdown | phases 6 and 7 |
+| Modelling and architecture (10) | done with a stated cut: invariants in domain classes, no ports (D11) | `ARCHITECTURE.md` |
+| Tests (10) | done: unit, real Postgres and SQS integration, races, multi-instance; no load test | `tests.md` |
+| Observability (5) | done: JSON logs with allow-list, `/metrics`, health, outbox lag | phase 9 |
+| Documentation (5) | done: README setup, `ARCHITECTURE.md`, `tests.md`, `deployment.md`, `taxonomy.md`, Postman | phase 10 |
+| Auth (0) | not implemented by design: no-op `AuthGuard` (D15) | `ARCHITECTURE.md` |
+
+Cut or not built (all listed with ceilings in `ARCHITECTURE.md`, "Limitations" and "Considered, not implemented"): load test, repository ports, outbox lease/reaper, inbox/outbox retention, real identity provider, hot-wallet partitioning, per-instance metric label.
+
+## Baseline (phase 0)
 
 | Area | What exists | Where |
 |---|---|---|
 | Project skeleton | NestJS 12, TypeScript strict, ESM (`nodenext`), vitest, oxlint | `package.json`, `tsconfig.json` |
-| Package manager | bun (was npm). Bun is only the package manager/script runner; Nest still runs on Node | `bun.lock`, `Dockerfile`, `packageManager` field |
+| Package manager | bun as package manager/script runner; Nest still runs on Node | `bun.lock`, `Dockerfile` |
 | Docker Compose | `nest-app` (live reload via bind mount), `db` (postgres:13), `localstack` (SQS only) | `docker-compose.yaml` |
-| ORM wiring [4] | MikroORM v7 + `@mikro-orm/nestjs`, config from `DATABASE_URL`, schema-file discovery (`*.schema.ts`) | `src/mikro-orm.config.ts`, `src/app.module.ts` |
-| Health checks [9] | `GET /health/live` always 200. `GET /health/ready` probes Postgres (`select 1`) and SQS (`ListQueues`), 2 s timeout each, 503 with per-dependency booleans on failure | `src/health.*.ts` |
-| Money value object [6.1] | `Money` on `decimal.js`: scale-2 string in/out, immutable, currency-mismatch errors, sign predicates. 38 unit tests passing (`0.1 + 0.2`, invalid inputs, `negate` of zero, mismatch on every binary op, JSON round trip) | `../src/money/money.ts`, `src/money/dto/money.props.dto.ts`, `test/money/money.spec.ts` |
-| Domain model [6.0 to 6.4, 7.2] | Phase 2 complete: `Money`, `Wallet` (debit/credit return the ledger entry, `openingEntry`), `WalletLedgerEntry`, `WagerTransaction` (rule table, state machine, retry state, `checkReference`, `ledgerDirectionFor`), `payloadHash`, `backoffMs`, typed errors, `FailureCode`. 280 unit tests. See "Phase 2" below | `src/money`, `src/wager`, `src/wallet`, `test/unit` |
-| SQS client | `@aws-sdk/client-sqs` added; endpoint/region/credentials via `AWS_*` env vars (no config code) | `docker-compose.yaml` |
+| ORM wiring | MikroORM v7 + `@mikro-orm/nestjs`, explicit entity list | `src/mikro-orm.config.ts` |
+| Health checks | `/health/live` always 200; `/health/ready` probes Postgres and the SQS queue, 2 s timeout each | `src/health.*.ts` |
 
 ## Decisions taken so far (Money decisions are already in `ARCHITECTURE.md`; the rest are to be copied)
 
@@ -22,22 +35,6 @@ Status against the README (`README.md`, section numbers in brackets). Updated 20
 - **Readiness probes use the real clients, not HTTP calls to the containers.** Postgres has no HTTP endpoint, and `/_localstack/health` only exists in LocalStack, so it would pass while the app's own SQS config was broken.
 - **MikroORM connects lazily**, so `orm.checkConnection()` reports "not established" until the first query. The probe runs an actual query instead.
 - **vitest/coverage pinned to ^5.** `^4` crashes npm's resolver (`edgesOut` error). Irrelevant under bun but kept at 5.
-
-## Not done (README requirements still open)
-
-| Area | Points | Gap |
-|---|---|---|
-| Domain model [6] | 20+10 | `Money` done. `Wallet` partial (`open` only). `WagerTransaction` and `WalletLedgerEntry` are compile-only stubs. Domain must not import ORM or Nest decorators, so map via `EntitySchema` |
-| Migrations [4] | - | None. Must be versioned and reversible. No migration scripts in `package.json` yet |
-| API [9] | - | No wallet or transaction endpoints, no reconciliation endpoint |
-| Idempotency, concurrency [7, 8] | 35 | Nothing. Needs persistent dedup, locking strategy (`LockMode` or versioning), multi-instance test |
-| SQS consumer, inbox [10] | 15 | Queues `wager-transactions.fifo` and `-dlq.fifo` are not provisioned. No consumer, inbox, retry/DLQ |
-| Outbox [11] | - | None. No publish-after-commit |
-| Observability [12] | 5 | Only health. No structured logs or metrics |
-| Tests [13] | 10 | One placeholder spec, and it currently fails (`app.service.ts` returns `Hello World 5!`). No integration or concurrency tests |
-| Postman collection | - | Required by project instructions, missing |
-| Docs | 5 | `ARCHITECTURE.md` started (Money section only). `tests.md` and taxonomy file missing. `deployment.md` written |
-| Auth [2] | 0 | Not started. README accepts skipping if the decision and extension point (no-op guard/port) are documented |
 
 ## Phase 2: domain model (done 2026-10-21)
 
@@ -263,38 +260,29 @@ Open items:
 - No `instance` label; `INSTANCE_ID` is unused.
 - Consumer received/acked counts and the 5xx stack in JSON mode were not checked beyond the unit test.
 
-## WagerTransaction stubs: decisions deferred (superseded)
+## Phase 10: documentation (done 2026-10-22)
 
-**Superseded 2026-10-20:** every point below was decided (D1 to D11, D17, D18) and is written in `ARCHITECTURE.md` and `plan.md`. Kept only as history; delete when convenient. Original text:
+| Step | State | Detail |
+|---|---|---|
+| 0 `ARCHITECTURE.md` | done | index with D-numbers, stale Money/D1 text fixed, HTTP 500 row, concurrency walkthrough (lock order), consolidated Limitations (each with ceiling and way up), Considered-not-implemented, D16 |
+| 1 Reference documents | done | `taxonomy.md` created from `failureCode.ts`, `toHttp.ts`, `src/events/`, `queues.sh`, `metrics.service.ts`, `logEvent.ts`; environment table in `deployment.md` from `grep process.env`; coverage figure in `tests.md`; empty `test.md` deleted; this log's stale sections replaced by the final status table |
+| 2 README and Postman | done | "Setup and commands" section on top of `README.md`; Metrics request added; `newman`: 35 requests, 69 assertions, 0 failed, on the live stack and on the fresh clone |
+| 3 Fresh-clone dry run | done | below |
 
-Stubs exist only so `tsc` passes. Props types (`CreateWagerTransactionProps`, `WagerTransactionState`, `CreateLedgerEntryProps`, `LedgerEntryState`) are `unknown`. Open points, to decide before implementing:
+**Dry run (2026-10-22).** A copy of what a commit contains (tracked plus untracked files, no `.env`, `node_modules`, `dist`) in a temp directory, following only the README: `cp .env.example .env`, `docker compose up -d --build` (22 s), `docker compose exec nest-app bun run migration:up`, `/health/ready` 200, `/metrics`, `bun run test` (429), `bun run test:e2e` (223), `bun run test:multi` (8), `newman` (35 requests, 0 failed). The clone's own stack was removed with `down -v` afterwards.
 
-- **State machine.** Valid transitions undefined. Proposal: `PENDING` to any of the other four; `PENDING_REFERENCE` to `PROCESSED`/`REJECTED`/`FAILED`/itself; terminals throw `InvalidTransactionStateError`. Decide whether `processedAt` is set only on `PROCESSED`.
-- **`PENDING_REFERENCE` retry state** (attempts, `nextAttemptAt`, first-seen for TTL) has no field in the skeleton [7.1]. Nullable fields on the transaction, or a separate table.
-- **`create` validation by kind.** `OPENING` must be creatable internally (block it at API/consumer, not in the factory). Reference required for `REFUND`/`ROLLBACK`, forbidden for `BET`/`OPENING`, optional for `WIN`, unspecified for `LOSS`. Amount must be positive; zero `LOSS` and zero `OPENING` undecided.
-- **`ledgerDirectionFor`.** `OPENING`/`WIN`/`REFUND` credit, `BET` debit, `LOSS` no entry, `ROLLBACK` inverse of the reference.
-- **Reference rules 2-5 have no method.** Needs a pure check returning a `FailureCode`. Rule 4 is ambiguous: read literally, a `BET` could be both refunded and rolled back (double credit). Proposed reading: at most one `PROCESSED` reversal per transaction, enforced by a unique index or the wallet lock, not only in memory.
-- **Idempotency.** Relation between `idempotencyKey`, `(providerId, externalTransactionId)` and `payloadHash` undefined. Proposal: unique `(providerId, idempotencyKey)` and `(providerId, externalTransactionId)`; same key with another hash is 409.
-- **`FailureCode` taxonomy** [7.2] and the `reject` vs `fail` boundary (`fail` on DLQ / non-retryable) are open.
-- `Wallet.rehydrate`, `debit` and `credit` are also still `todo`.
+Guesses found and fixed:
+- **`bun install` after `docker compose up` fails with `EACCES`**: Docker creates `node_modules/` on the host as root (anonymous volume mount point). README and `deployment.md` now say `bun install` first, with the recovery commands.
+- The Start section never said to apply the migration; the app does not migrate on boot, so every wallet request failed until it ran. Added to README and `deployment.md`.
+- `outbox.tick_failed` errors appear in the log between `compose up` and `migration:up` (tables missing); they stop once the migration is applied. Documented as expected.
+- `deployment.md` still listed "no queues" and "boot race" as known problems; removed (queues are created on start, Compose has healthchecks).
+
+Also changed in this phase: `OutboxPublisher` now stops in `beforeApplicationShutdown` like the other workers (it used `onApplicationShutdown`, which could race the ORM close); the two shutdown tests call the new name.
+
+Not run: the dry run was on the same machine and the same Docker daemon, so it does not prove a different OS or an empty Docker image cache. `errorType` in logs is the error class name, which the pg driver reports as just `error` for database errors; the message is left out on purpose (it can quote values).
 
 ## Known issues and risks
 
-- `src/app.service.ts` and its spec disagree; `bun run test` fails.
-- `.env` holds the DB password and is used by Compose. It is git-ignored; there is no `.env.example` for reviewers yet.
-- `DATABASE_URL` ends in `?schema=public` (Prisma style). Ignored by the driver; set `schema` in the MikroORM config if a non-default schema is wanted.
-- No `healthcheck`/`condition: service_healthy` in Compose, so the app can start before Postgres accepts connections. Readiness covers this at runtime, but the first MikroORM query may race at boot.
-- `Money` throws plain `Error`s (distinct messages, no typed classes). Add `InvalidMoneyError` / `CurrencyMismatchError` before the HTTP layer so a filter can map to 422. Tests only assert `toThrow()`.
-- `Money.equals` throws on currency mismatch (decision recorded in `ARCHITECTURE.md`). Revisit if a caller needs a non-throwing comparison.
-- `Money.from` accepts negatives (the domain needs them for signed differences); the request DTOs reject them (phase 5, `money.dto.ts`).
-- `Money` persistence mapping is settled (D10: `numeric(19,2)` + `char(3)`, mapper functions, proven by the phase 3 round-trip spec).
-- `tests.md` and the coverage target for the 80% goal are untracked.
-
-## Suggested next steps (smallest path to the scoring weight)
-
-1. ~~`Money` value object + unit tests~~ done 2026-10-20.
-   - Next in the domain: decide the open points under "WagerTransaction stubs", then implement `WagerTransaction`, `WalletLedgerEntry`, `Wallet.debit/credit` with unit tests.
-2. `Wallet` / ledger schemas + first migration, with up/down scripts.
-3. Submit-transaction use case with persistent idempotency key and row lock; concurrency test against real Postgres.
-4. Provision queues (LocalStack init script), then inbox/outbox and consumer.
-5. Fill `ARCHITECTURE.md` from the decisions above as each lands.
+- `DATABASE_URL` is read by MikroORM only; `bun` expands the `${...}` values of `.env`, plain `node` does not (see `deployment.md`, migrations).
+- The compose `nest-app` keeps its own anonymous `node_modules` volume: after `bun add`, run `docker compose up -d --build -V nest-app`.
+- Limits and risks of each mechanism (lock held while publishing, FIFO head-of-line blocking, no retention jobs, single machine) are in `ARCHITECTURE.md`, "Limitations".

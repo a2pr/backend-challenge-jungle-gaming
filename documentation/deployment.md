@@ -10,25 +10,38 @@ Everything runs through Docker Compose. Only the local/dev setup exists today; t
 
 ## Environment
 
-Compose reads `.env` in the project root. It must define:
+Compose reads `.env` in the project root; `.env.example` is the template (`cp .env.example .env`, then set `DATABASE_PASSWORD`). Do not commit `.env`. Inside Compose, `docker-compose.yaml` overrides the host-facing values (`DATABASE_URL` points at the `db` service, SQS at `localstack`, queue URLs and region are fixed there).
 
-| Variable | Example | Used by |
+| Variable | Default | Meaning |
 |---|---|---|
-| `DATABASE_HOST` | `nest-postgres` | also sets the Postgres container name |
-| `DATABASE_USER` / `DATABASE_PASSWORD` / `DATABASE_NAME` | `root` / `…` / `nest` | Postgres init |
-| `DATABASE_PORT` | `5432` | URL below |
-| `DATABASE_URL` | `postgresql://USER:PASS@${DATABASE_HOST}:${DATABASE_PORT}/${DATABASE_NAME}` | MikroORM (`clientUrl`) |
-| `LOCALSTACK_DOCKER_NAME` | `localstack` | optional, defaults to `localstack-main` |
+| `DATABASE_HOST` / `DATABASE_USER` / `DATABASE_PASSWORD` / `DATABASE_NAME` / `DATABASE_PORT` | none (set in `.env`) | Postgres init and the URLs below; `DATABASE_HOST` also names the Postgres container |
+| `DATABASE_URL` | none, required | MikroORM `clientUrl` |
+| `DATABASE_URL_TEST` | none | separate `<name>_test` database used by `test:e2e` and `test:multi`; created on demand |
+| `DATABASE_POOL_MAX` | 20 | pool size per process; keep it times the instance count below Postgres `max_connections` (100 in `postgres:13`) |
+| `PORT` | 3000 | HTTP port |
+| `WORKERS_ENABLED` | `true` | `false` switches off the consumer, the outbox publisher and the pending-reference worker (tests and the lag demo) |
+| `OUTBOX_POLL_MS` | 1000 | outbox publisher tick |
+| `PENDING_POLL_MS` | 5000 | pending-reference worker tick |
+| `WAGER_QUEUE_URL` / `WAGER_DLQ_URL` / `EVENTS_QUEUE_URL` | none, required | the three queues, see `taxonomy.md` |
+| `WAGER_MAX_RECEIVE_COUNT` | 5 | must equal the queue's `maxReceiveCount` (`localstack/init/ready.d/queues.sh`); a test checks it |
+| `AWS_ENDPOINT_URL_SQS`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | none | read by the AWS SDK. LocalStack takes any credentials (`test`/`test` in Compose); drop the endpoint to use real SQS |
+| `TESTING_MULTIPLE_INSTANCES` | 3 | instance count of `test:multi` |
+| `INSTANCE_ID` | none | set by `test:multi` on each child; the app does not read it yet |
+| `LOCALSTACK_DOCKER_NAME` | `localstack-main` | LocalStack container name |
+| `TESTING_WITH_FAILURES`, `LOCALSTACK_VOLUME_DIR` | unused | left in `.env.example`; failure injection is done by `overrideProvider` in the tests |
 
-SQS settings are fixed in `docker-compose.yaml` (`AWS_ENDPOINT_URL_SQS=http://localstack:4566`, region `us-east-1`, dummy credentials `test`/`test`). Do not commit `.env`.
+Queues are created by `localstack/init/ready.d/queues.sh` when LocalStack becomes ready (idempotent); the app starts after LocalStack's healthcheck passes.
 
 ## Start
 
 ```bash
+cp .env.example .env                                  # first time only
+bun install                                           # before the first compose up (see below)
 docker compose up -d --build
+docker compose exec nest-app bun run migration:up     # first time, and after every new migration
 ```
 
-Services:
+The app never migrates on boot, so until `migration:up` runs every wallet request fails. Services:
 
 | Service | Image | Notes |
 |---|---|---|
@@ -122,9 +135,8 @@ docker compose exec nest-app bun run migration:down     # reverts the LAST migra
 ## Known problems
 
 - **LocalStack auth token.** `localstack/localstack:latest` and `-pro` exit with code 55 (`License activation failed`) without `LOCALSTACK_AUTH_TOKEN`. The compose file pins 4.4 to avoid this. To use a current image, create a free account, put the token in `.env`, and pass `LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN}` to the service.
+- **`bun install` fails with `EACCES` on `node_modules`.** The compose file mounts an anonymous volume at `/usr/src/app/node_modules`; if Compose starts before the host ever ran `bun install`, Docker creates that directory on the host as root. Run `bun install` before the first `docker compose up`. To recover: `docker compose down`, `docker run --rm -v "$PWD":/app alpine rmdir /app/node_modules`, then `bun install`.
 - **Root-owned files on the host.** If `dist/` or `tsconfig.build.tsbuildinfo` become root-owned (container run as root), `bun run build` fails with `EACCES`. Remove with `docker run --rm -v "$PWD":/app alpine rm -rf /app/dist /app/tsconfig.build.tsbuildinfo`.
-- **Boot race.** There are no Compose `healthcheck`s yet, so `nest-app` can start before Postgres accepts connections.
-- **No queues.** `wager-transactions.fifo` and `wager-transactions-dlq.fifo` are not created. The SQS probe only checks reachability.
 
 ## Production considerations (not implemented)
 

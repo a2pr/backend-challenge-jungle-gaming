@@ -163,7 +163,7 @@ describe('OutboxPublisher', () => {
 
         timed.onApplicationBootstrap();
         await vi.waitFor(async () => expect(await pending()).toBe(0), {timeout: 5000});
-        await timed.onApplicationShutdown();
+        await timed.beforeApplicationShutdown();
 
         expect(new Set(await eventIds()).size).toBe(2);
     });
@@ -174,7 +174,7 @@ describe('OutboxPublisher', () => {
 
         idle.onApplicationBootstrap();
         expect(await pending()).toBe(2);
-        await idle.onApplicationShutdown();
+        await idle.beforeApplicationShutdown();
         expect(await receiveAll(queues.eventsQueueUrl)).toEqual([]);
     });
 });

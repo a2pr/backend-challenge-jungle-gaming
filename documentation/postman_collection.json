@@ -63,6 +63,37 @@
               ]
             }
           }
+        },
+        {
+          "name": "Metrics",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('exposes the wager metrics', () => {",
+                  "    pm.expect(pm.response.text()).to.include('wager_transactions_total');",
+                  "    pm.expect(pm.response.text()).to.include('outbox_lag_seconds');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/metrics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            }
+          }
         }
       ]
     },

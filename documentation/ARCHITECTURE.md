@@ -1,10 +1,23 @@
 # Architecture decisions
 
-Decisions taken so far, section numbers refer to `README.md`. Decision numbers (D1 to D18) follow `plan.md`; D1 to D11, D17 and D18 were taken on 2026-10-20 (phase 1) and D12 (phase 6) and D13, D15 (phase 5) are taken; D14 and D16 are taken in the phase that needs them. Infrastructure decisions (LocalStack pin, container user, readiness probes, lazy MikroORM connection) are in `progress-log.md` and will be moved here as each area is implemented.
+Section numbers in brackets refer to `README.md`. Decision numbers (D1 to D18) follow `plan.md`; every one is taken. Reading order for a reviewer: this index, then the concurrency walkthrough, the limitations and the not-implemented list at the end. Values a provider sees are in `taxonomy.md`; commands in `tests.md` and `deployment.md`.
+
+| Area | Section | Decisions |
+|---|---|---|
+| Money | Money value object | D10 |
+| State and retries | State machine and scenarios | D2, D3, D8 |
+| Concurrency | Concurrency, walkthrough, multi-instance | D1 |
+| Idempotency | Idempotency | D6 |
+| References | References and reversals, failure codes | D4, D5, D7, D18 |
+| HTTP | HTTP status mapping, HTTP layer | D9, D13, D15 |
+| Persistence | Persistence | D10, D11, D17 |
+| Messaging | Outbox publisher, SQS consumer | D12 |
+| Observability | Observability | D14 |
+| Documentation | Documentation | D16 |
 
 ## Money value object [6.1, 5.1]
 
-Code: `../src/money/money.ts`, DTO `src/money/dto/money.props.dto.ts`, tests `test/money/money.spec.ts`.
+Code: `../src/money/money.ts`, DTO `src/money/dto/money.props.dto.ts`, tests `test/unit/money/money.spec.ts`.
 
 ### Decisions
 
@@ -20,15 +33,13 @@ Code: `../src/money/money.ts`, DTO `src/money/dto/money.props.dto.ts`, tests `te
 | Sign predicates | `isPositive` is `gt(0)`, `isNegative` is `lt(0)` | `Decimal.isPositive()` returns `true` for zero |
 | Domain purity | No imports from `@nestjs/*` or `@mikro-orm/*` | README 6.1. Persistence mapping lives in an `EntitySchema` (infrastructure layer) |
 
-### Not implemented yet / open
+### Still open (Money)
 
-- **Typed errors.** Failures are plain `Error`s with different messages. Add `InvalidMoneyError` and `CurrencyMismatchError` before the HTTP layer so a filter can map them to 422 without string matching.
-- **Persistence mapping.** Two options: `numeric(19,2)` + `char(3)` columns rehydrated through a MikroORM custom type or embeddable, or `bigint` cents. Decision deferred to the Wallet schema work.
-- **Request DTO validation** (negative rejection, max amount guard) is not written; it belongs to the API layer.
 - **Rounding/division.** None exists. Scale is fixed at 2 and there is no multiply/divide, so rounding mode is not a decision yet. If fees or splits are added, a rounding mode (banker's vs half-up) must be chosen explicitly.
-- **Max amount.** `Decimal` has no overflow, but the database column (`numeric(19,2)`) does. Validate at the boundary.
-- **Currency list.** Only the shape is checked.
-- **Multi-currency.** The model is multi-currency, but the challenge may run with `BRL` only (README 6.1). The mismatch behavior is covered by tests.
+- **Max amount.** `Decimal` has no overflow, but the database column (`numeric(19,2)`) does; the request DTO limits it to the column range (`^\d{1,16}\.\d{2}$`).
+- **Currency list.** Only the shape is checked; the model is multi-currency but only `BRL` is exercised.
+
+Done since the first draft: typed errors (`InvalidMoneyError`, `CurrencyMismatchError`), persistence mapping (D10), request validation (D13).
 
 ## State machine and scenarios [6.3, 7, 7.1] (D2, D3, D8)
 
@@ -50,7 +61,7 @@ Source of the picture: `wager-transaction-states.svg` (same folder). Thirteen sc
 |---|---|---|---|
 | D1 Lock strategy | Pessimistic: `SELECT ... FOR UPDATE` on the wallet row as the first statement of the transaction. The unit of concurrency is the wallet, so wallets run in parallel and there is no global lock. The `UPDATE` also checks `WHERE version = ?` as a second guard, and the schema has `CHECK (balance >= 0)` as the last | **Optimistic `version` + retry:** best when contention is rare, but a hot wallet turns N concurrent writers into about N squared attempts, needs a retry cap, and idempotency needs its own race handling (catch the unique violation). **Atomic conditional `UPDATE`:** the balance rule moves into SQL and bypasses the `Wallet` class, the reference and reversal rules still need reads under a lock, and the row lock is held until commit anyway, so it saves one round trip, not blocking | Everything for one wallet is serialised: the idempotency lookup, the reference lookup, the "already reversed" check and the balance change see a stable state. Cost: a hot wallet queues in Postgres, each waiter holding a connection, so the transaction must stay short and use `lock_timeout` (answer 503 on timeout). Only one lock per transaction (its own wallet), so no deadlocks |
 
-**To validate with data (phase 4, test 15).** One wallet, 200 concurrent small bets with the pool at 10, 60 and 200 connections, against 200 wallets as the baseline. Record total time, throughput, p50/p95/max lock wait, requests that hit `lock_timeout` and whether the pool was exhausted. Expected: slower on the hot wallet but exact. The numbers go here when they exist, with what would trigger a change (for example hot-wallet p95 above target or timeouts under normal load) and the alternative (optimistic with a bounded retry for wallets measured as cold).
+**Validated (phase 4, test 15).** The contention experiment is under "Use case wiring" ("Contention experiment"): a hot wallet is exact at every pool size, slower than 200 wallets, and a pool of 200 exhausts Postgres connections (100 calls failed). The change trigger and the alternative stay as written above: hot-wallet p95 above target or `lock_timeout` under normal load moves cold wallets to optimistic with a bounded retry.
 
 ## Idempotency [9, 5.2] (D6)
 
@@ -100,7 +111,8 @@ Rule: **status codes describe the request, not the stored state.** The outcome m
 | Business rejection (`status: REJECTED`, `failureCode`); a replay returns the same 422 | 422 | yes |
 | `PENDING_REFERENCE` | 202 | yes, retried by the worker |
 | `PROCESSED`, replays included | 200 (`POST /wallets`: 201) | yes |
-| Transient infrastructure failure | 503 with `Retry-After: 1` | no, safe to resend the same request |
+| Transient infrastructure failure (lock timeout, connection loss) | 503 with `Retry-After: 1` | no, safe to resend the same request |
+| A bug (`INVALID_STATE`) or a non-`Error` throw | 500, message hidden | no |
 
 **Implemented (phase 5).** Two functions hold the whole mapping, so no controller chooses a status:
 
@@ -292,3 +304,61 @@ The timers' "skip the beat while the previous tick runs" only avoids overlap ins
 | `IdempotencyConflictError` | Not counted in `wager_duplicates_total` | Counting it | It is a conflicting payload, not a duplicate; it shows as a 409 in the HTTP status logs |
 
 **Not done.** No per-instance label (`INSTANCE_ID` is not read), so a multi-instance scrape needs the scraper to add `instance`; no OpenTelemetry or dashboard (optional in the README); no metric for the consumer's received/acked counts or FIFO group blocking; the ledger-page and read endpoints are not timed.
+
+## Concurrency walkthrough: the README §8 scenario
+
+Wallet with 100.00, two `BET` of 80.00 arrive at the same instant on two instances (HTTP, queue or both). Order inside each transaction (`SubmitWagerTransactionUseCase.process`):
+
+| Step | What happens | Why this order |
+|---|---|---|
+| 1 | `BEGIN`; `SET LOCAL lock_timeout = '5s'` | a request stuck behind a hot wallet fails with 503 instead of queueing forever |
+| 2 | queue only: insert the inbox row `(consumer, messageId)` | a redelivery stops here as `duplicate-message`; it holds no wallet lock yet, so two deliveries of one message cannot deadlock (the second waits on the unique index only) |
+| 3 | `SELECT ... FROM wallets WHERE id = ? FOR UPDATE` | the one lock of the transaction; the second `BET` blocks here until the first commits |
+| 4 | build the transaction, look up `(provider, key)` then `(provider, externalId)` | after the lock, so a concurrent twin has already committed or is waiting: replay, `409` or fall through |
+| 5 | `decide`: wallet checks, reference lookup, `Wallet.debit` (domain rule, no negative balance) | all reads see state that cannot change until commit |
+| 6 | `UPDATE wallets SET balance, version WHERE id AND version = ?`, insert transaction, insert ledger entry, insert outbox rows, mark inbox processed | the transaction row first (the ledger row references it); the version guard and `CHECK (balance >= 0)` are the second and third nets |
+| 7 | `COMMIT`, then counters and logs, then (queue) `DeleteMessage` | nothing leaves the process before the commit |
+
+First `BET` commits (balance 20.00). The second wakes up, re-reads the row (`READ COMMITTED` after a `FOR UPDATE` wait sees the committed version), `debit` refuses, the transaction is stored `REJECTED` / `INSUFFICIENT_FUNDS` (422) and its event is queued. Lock order is always inbox, then wallet, then rows; the pending-reference worker takes the wallet first and re-reads under it, so no two paths take locks in opposite order. Proof: `concurrency.spec.ts` (one process, 200 calls), `http.spec.ts` (three processes), and the sabotage check in `tests.md`. Experiment numbers: "Contention experiment".
+
+## Limitations
+
+Stated as limitations, each with its ceiling and the way up.
+
+| Limitation | Ceiling | Way up |
+|---|---|---|
+| **No authentication** (D15): `playerId` and `providerId` are trusted as sent | anyone who reaches the port can move money | replace `AuthGuard` with a JWT/OIDC guard (`{provide: AuthGuard, useClass}`); derive the provider from the token |
+| One hot wallet is serialised by its row lock | measured 200-260 bets/s on one wallet, versus 550 on 200 wallets | partition a hot wallet into sub-balances, or queue per wallet and batch |
+| `DATABASE_POOL_MAX` times the instance count must stay below `max_connections` | pool 200 failed 100 calls (`too many clients`) | PgBouncer, or smaller pools |
+| The outbox publisher calls SQS while holding up to 50 row locks | a slow SQS holds those rows and one connection | claim-then-publish with a lease column and a reaper |
+| The consumer handles a batch sequentially | one message at a time per instance | add instances (wallets run in parallel); parallelise across `MessageGroupId` |
+| FIFO head-of-line blocking: a poison message delays its wallet until it reaches the DLQ | about 2 minutes (5 receives x 30 s visibility) | lower `maxReceiveCount` or visibility timeout |
+| Backoff has no jitter | identical failures retry together | add jitter in the caller |
+| Inbox, outbox and ledger rows are never deleted | tables grow without bound | retention job for published outbox and old inbox rows; month partitions for the ledger |
+| A `FAILED` row replays as 409 on DLQ redrive | a redriven message does not run again | resubmit with a new key once the fault is fixed (documented to the provider) |
+| `recordFailure` can hit a unique violation if the same key races on another wallet | the message is redriven by SQS | one retry like `execute` |
+| Outbox has no terminal state: a permanently broken destination retries forever | `attempts` grows | alert on high `attempts` and `outbox_lag_seconds` |
+| Events are at least once and unordered | consumers must dedupe by `eventId` and not rely on order | per-aggregate sequence number (`walletVersion` is already in `WalletBalanceChanged`) |
+| Single currency exercised; partial reversals out of scope | `REVERSAL_AMOUNT_MISMATCH` rejects them | reversal amounts as a sum of linked entries |
+| The observed balance (`balance_after`) is persistence-only; the retry state adds two fields (`attempts`, `nextAttemptAt`) to the README `WagerTransaction` constructor | deviation from the skeleton | listed under "Deviations from the README skeletons" |
+| LocalStack pinned to 4.4 (newer tags need an auth token), Postgres 13 near end of life | no security patches | real SQS and a supported Postgres major |
+| Tests ran on one machine against one Postgres | shows correctness across processes, not across hosts or partitions | repeat `test:multi` against a staging cluster |
+| `INSTANCE_ID` is not read; metrics have no instance label | logs cannot say which instance did what | read it in `main.ts`, add it to the log and as a scrape label |
+
+## Considered, not implemented
+
+The project asks for these to be named even when not built.
+
+- **Load test** (`bun run test:load`): the contention experiment (D1) measures one process; a load test through HTTP with p50/p95/p99 and outbox lag would measure the system.
+- **Repository interfaces and in-memory adapters** (ports): D11 chose concrete repositories behind pure mappers; the hexagonal boundary is the domain/mapper split, not interfaces. Cost of adding: about a day, and the integration tests would still be needed.
+- **Outbox lease and reaper**, instead of holding locks while publishing.
+- **Retention jobs** for inbox, outbox and old ledger partitions.
+- **Real identity provider** (Keycloak or Zitadel): the extension point exists, the flow does not.
+- **Partitioning for hot wallets.**
+- **OpenTelemetry and a dashboard** (optional in the README); `/metrics` and JSON logs are the supported surface.
+- **A DLQ redrive tool** that re-submits `FAILED` rows with a new key.
+- **A balance-equals-ledger constraint** in the database: reconciliation reports it instead (see "Schema notes"), because a deferred constraint costs a `SUM` on every write.
+
+## Documentation [14] (D16)
+
+The root `README.md` keeps the challenge text and has a short "Setup and commands" section on top that links to `documentation/`. The alternative, a link only, was rejected because the README is what a reviewer opens first and §14 scores setup there. The reviewer path, run once from a fresh clone, is in `progress-log.md`.

@@ -1,5 +1,39 @@
 # Technical Challenge — Distributed Wagering Processor
 
+## Setup and commands (candidate's section)
+
+The challenge text starts below. This section is how to run the solution; the reasoning is in [`documentation/ARCHITECTURE.md`](documentation/ARCHITECTURE.md).
+
+**Prerequisites:** Docker with the Compose plugin, [bun](https://bun.sh) >= 1.4 (host scripts and tests only), free ports 3000, 5432, 4566.
+
+```bash
+cp .env.example .env                                  # local values; .env is git-ignored
+bun install                                           # FIRST: if Compose starts first, Docker creates node_modules/ as root and bun install fails with EACCES
+docker compose up -d --build                          # app :3000, Postgres :5432, LocalStack (queues are created on start)
+docker compose exec nest-app bun run migration:up     # the app never migrates on boot
+curl localhost:3000/health/ready                      # {"postgres":true,"sqs":true}
+curl localhost:3000/metrics                           # Prometheus text
+```
+
+```bash
+bun run test                                          # unit tests, no infrastructure
+bun run test:e2e                                      # integration + HTTP against real Postgres and LocalStack
+bun run test:multi                                    # 3 real processes on one database and queue (builds dist/ if stale)
+```
+
+`test:e2e` and `test:multi` need the Compose services running (`docker compose up -d db localstack` is enough) and use a separate `<name>_test` database and throwaway queues, never the dev data.
+
+| Document | What is in it |
+|---|---|
+| [`documentation/ARCHITECTURE.md`](documentation/ARCHITECTURE.md) | decisions with rejected alternatives, concurrency walkthrough, limitations, what was not built |
+| [`documentation/tests.md`](documentation/tests.md) | every test command, what each layer proves, multi-instance tests |
+| [`documentation/deployment.md`](documentation/deployment.md) | environment variables, migrations, running several instances, operations |
+| [`documentation/taxonomy.md`](documentation/taxonomy.md) | failure codes, HTTP errors, events, queues, metrics, log events |
+| [`documentation/postman_collection.json`](documentation/postman_collection.json) + `postman_environment.json` | every endpoint and every error case; import both, base URL `http://localhost:3000` |
+| [`documentation/progress-log.md`](documentation/progress-log.md) | final status against the scoring table, per-phase notes |
+
+---
+
 ## Bem-vindo à Jungle Gaming 🦧
 
 A **Jungle Gaming** é uma software house especializada em iGaming — desenvolvemos plataformas de cassino online com tecnologia de ponta: NestJS, Bun, TanStack, DDD e arquitetura orientada a eventos. Somos apaixonados por engenharia de software e acreditamos que grandes produtos nascem de grandes times.

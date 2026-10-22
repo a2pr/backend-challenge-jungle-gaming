@@ -1,4 +1,4 @@
-import {Inject, Injectable, Logger, OnApplicationBootstrap, OnApplicationShutdown} from "@nestjs/common";
+import {BeforeApplicationShutdown, Inject, Injectable, Logger, OnApplicationBootstrap} from "@nestjs/common";
 import {MikroORM} from "@mikro-orm/postgresql";
 import {SendMessageCommand, SQSClient} from "@aws-sdk/client-sqs";
 import {OutboxRepository} from "./outbox.repository.js";
@@ -11,7 +11,7 @@ const BATCH_SIZE = 50;
 
 // The only place events leave the system: claim, send, mark, commit, in that order. Never called from a use case.
 @Injectable()
-export class OutboxPublisher implements OnApplicationBootstrap, OnApplicationShutdown {
+export class OutboxPublisher implements OnApplicationBootstrap, BeforeApplicationShutdown {
     private readonly logger = new Logger(OutboxPublisher.name);
     private timer?: NodeJS.Timeout;
     private inFlight?: Promise<unknown>;
@@ -31,7 +31,8 @@ export class OutboxPublisher implements OnApplicationBootstrap, OnApplicationShu
         this.timer = setInterval(() => this.run(), this.config.outboxPollMs);
     }
 
-    async onApplicationShutdown(): Promise<void> {
+    // Before (not on) shutdown: the ORM closes in onApplicationShutdown, and a tick in flight still needs it to commit.
+    async beforeApplicationShutdown(): Promise<void> {
         clearInterval(this.timer);
         await this.inFlight;
     }

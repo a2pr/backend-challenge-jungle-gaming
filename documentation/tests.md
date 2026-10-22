@@ -10,6 +10,10 @@ Three vitest configs (unit, integration/e2e, multi-instance), one database. `bun
 | `bunx vitest run --config ./vitest.config.experiments.ts` | `test/experiments/**`: the contention experiment (D1), prints a markdown table; **not** part of the suite | same as e2e |
 | `bunx tsc --noEmit`, `bunx oxlint src/ test/`, `bun run build` | types, lint, compile | nothing |
 
+## Coverage
+
+`bun run test:cov` (v8, unit suite only): 98.9% statements, 95.6% branches, 99.3% lines over the files the unit tests load (`src/money`, `src/wager`, `src/wallet` domain classes, `src/messaging` domain and mapper classes, `src/events`, `src/http` mapping). Code that only runs against Postgres or SQS (repositories, use cases, consumer, publisher, controllers) is exercised by the integration suite and is **not** in this figure; `observability` shows 60% here because `MetricsService` is tested through `test/e2e/metrics.e2e-spec.ts`. The coverage that matters for the financial rules is the race and failure tests, not the percentage.
+
 ## The integration suite
 
 - `DATABASE_URL_TEST` points at a separate database; `test/support/globalSetup.ts` creates it if missing.
