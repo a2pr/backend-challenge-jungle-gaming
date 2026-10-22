@@ -7,7 +7,7 @@
 | | |
 |---|---|
 | Host | Intel i5-10300H (4 cores, 8 threads), 31 GB RAM, Linux 5.15, Docker 29.9.1 |
-| App | the Compose `nest-app` container: Node 22.22, one process, `bun run start:dev` (dev mode, source bind-mounted), `DATABASE_POOL_MAX=20`, workers on (consumer, outbox publisher at 1 s, pending-reference worker) |
+| App | the Compose `nest-app` container: Node 22.22 (the runtime before D19 moved the app to bun; not re-run since), one process, `bun run start:dev` (dev mode, source bind-mounted), `DATABASE_POOL_MAX=20`, workers on (consumer, outbox publisher at 1 s, pending-reference worker) |
 | Database | `postgres:13` in Docker on the same host, default settings |
 | Queues | LocalStack 4.4 in Docker on the same host |
 | Load generator | autocannon on the same host: it competes with the app, the database and LocalStack for the same 8 threads |

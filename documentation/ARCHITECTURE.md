@@ -1,6 +1,6 @@
 # Architecture decisions
 
-Section numbers in brackets refer to `README.md`. Decision numbers (D1 to D18) follow `plan.md`; every one is taken. Reading order for a reviewer: this index, then the concurrency walkthrough, the limitations and the not-implemented list at the end. Values a provider sees are in `taxonomy.md`; commands in `tests.md` and `deployment.md`.
+Section numbers in brackets refer to `README.md`. Decision numbers (D1 to D19) follow `plan.md`; every one is taken. Reading order for a reviewer: this index, then the concurrency walkthrough, the limitations and the not-implemented list at the end. Values a provider sees are in `taxonomy.md`; commands in `tests.md` and `deployment.md`.
 
 | Area | Section | Decisions |
 |---|---|---|
@@ -14,6 +14,7 @@ Section numbers in brackets refer to `README.md`. Decision numbers (D1 to D18) f
 | Messaging | Outbox publisher, SQS consumer | D12 |
 | Observability | Observability | D14 |
 | Documentation | Documentation | D16 |
+| Runtime | Runtime and test runner | D19 |
 
 ## Money value object [6.1, 5.1]
 
@@ -29,7 +30,7 @@ Code: `../src/money/money.ts`, DTO `src/money/dto/money.props.dto.ts`, tests `te
 | Currency | `/^[A-Z]{3}$/` shape check only | ISO-4217 shape is enough for the challenge. No code list, so `XXX` or `ZZZ` pass |
 | Immutability | `private constructor`, `readonly` fields, every operation returns a new `Money` | README 6.1. `Decimal` operations are themselves immutable |
 | Currency mismatch | `add`, `subtract`, `isLessThan` **and `equals`** throw | A cross-currency comparison is a programming error, not a "false" answer. A silent `false` from `equals` would hide a wallet/transaction currency bug. Trade-off: `equals` is not usable as a general predicate across unknown currencies |
-| Sign handling in `from` | Negative amounts are **accepted** by `Money.from` | Balances, `subtract` results and ledger `balanceBefore/After` can be negative intermediates, and `negate()` must round-trip through `toJSON`/`from`. "No negatives in input contracts" (6.1) is enforced at the request DTO validation layer, not in the value object |
+| Sign handling in `from` | Negative amounts are **rejected** by `Money.from` (`InvalidMoneyError`); a negative `Money` only comes from `negate` / `subtract` | A negative amount cannot enter through the API, the queue or a mapper by accident. Balances and ledger `balanceBefore/After` are never negative (schema `CHECK`s), so nothing needs to rehydrate one. Trade-off: `negate().toJSON()` does not round-trip through `from` |
 | Sign predicates | `isPositive` is `gt(0)`, `isNegative` is `lt(0)` | `Decimal.isPositive()` returns `true` for zero |
 | Domain purity | No imports from `@nestjs/*` or `@mikro-orm/*` | README 6.1. Persistence mapping lives in an `EntitySchema` (infrastructure layer) |
 
@@ -141,7 +142,7 @@ The guarantees live in the schema, not only in the code: `CHECK (balance >= 0)`,
 | (b) `seq` as cursor | `wallet_ledger_entries.seq` is `bigint GENERATED ALWAYS AS IDENTITY UNIQUE` and is the pagination cursor | Ledger writes for one wallet are serialised by the wallet lock (D1), so within a wallet `seq` order equals commit order. Across wallets it is only unique. **Not mapped in the row class yet** (inserts must never set it); map it read-only or read it in raw SQL when phase 5 needs pagination |
 | (c) No deferred balance constraint | A constraint proving `wallets.balance = SUM(ledger)` was considered and **not built** | It costs a trigger and a `SUM` on every write. The reconciliation endpoint plus the test invariant cover it. Revisit if a second writer other than the use case ever touches `wallets` |
 | (d) `OPENING` transactions | Internal opening credits use `provider_id = 'internal'`, `external_transaction_id = idempotency_key = 'opening:<walletId>'`, `round_id = game_id = 'opening'` | The `NOT NULL` columns need no special case, and the unique keys still make the opening idempotent |
-| Entity discovery | `src/mikro-orm.config.ts` lists the five `*Schema` objects **explicitly**; there is no `*.schema.ts` glob | The glob is imported natively by Node, which cannot resolve the `.js` specifiers inside `.ts` sources, so under vitest the e2e boot failed. Cost: a new schema must be added to the list |
+| Entity discovery | `src/mikro-orm.config.ts` lists the five `*Schema` objects **explicitly**; there is no `*.schema.ts` glob | The glob is imported natively by the runtime (Node at the time), which cannot resolve the `.js` specifiers inside `.ts` sources, so under vitest the e2e boot failed. Cost: a new schema must be added to the list |
 | Row classes and mappers | One plain row class per table, mapper functions for wallet, transaction and ledger entry. Inbox and outbox have no domain class, so no mapper. Nullable columns are `T \| null` in the row and `undefined` in the domain; `toRow` writes `null` | `numeric` comes back as a string (`"0.10"`, proven by the round-trip spec). The domain `version` is a plain column managed by the domain, not MikroORM's `version` property |
 | Running migrations | `src/migrate.ts` (`up`, `down`, `status`) behind `bun run migration:*`; never on app boot. The scripts run under `bun`, not `node`, so `.env` (with its `${...}` interpolation) is read | Several instances start together; schema changes are a release step (see `deployment.md`) |
 | Tests | Integration specs run against the real Postgres in the `${DATABASE_NAME}_test` database and rebuild the schema by running the migration | A mocked database cannot prove a constraint. `test/integration/schema.spec.ts` asserts each constraint by Postgres error code |
@@ -246,7 +247,7 @@ Unknown means transient: a wrong "transient" only retries, a wrong "permanent" s
 **Known limits.**
 - The consumer's loop pauses 1 s after an unexpected error (so a dead database does not spin the CPU); shutdown can wait up to that long.
 - `recordFailure` can still fail with a unique violation if the same key races on another wallet; the consumer then leaves the message and SQS redrives it.
-- **`SIGTERM` was checked with a real process, mid-message** (2026-10-21, `node dist/main`, throwaway queues, `WORKERS_ENABLED=true`). Another `psql` session held the wallet row lock for about 4 s so the first of three queued messages was stuck mid-handling; `SIGTERM` was sent then. The process stayed alive until the lock released (about 1.6 s), the message committed (`PROCESSED`, balance 90.00, ledger sum 90.00) and was deleted, and the other two became visible at once (0 in flight, DLQ empty). The exit code is **143**: Nest re-raises the signal after its hooks finish, so 143 is the graceful exit, not a kill. A deploy that sends `SIGTERM` must wait longer than the lock timeout (5 s) plus a commit before `SIGKILL`; Docker's default of 10 s is enough. Not automated: the `app.close()` test in `consumer.spec.ts` covers the same path without a signal. An idle stop (`docker compose stop`, consumer in its 20 s long poll) exits in 0.5 s with code 0.
+- **`SIGTERM` was checked with a real process, mid-message** (2026-10-21, then on Node: `node dist/main`, throwaway queues, `WORKERS_ENABLED=true`). Another `psql` session held the wallet row lock for about 4 s so the first of three queued messages was stuck mid-handling; `SIGTERM` was sent then. The process stayed alive until the lock released (about 1.6 s), the message committed (`PROCESSED`, balance 90.00, ledger sum 90.00) and was deleted, and the other two became visible at once (0 in flight, DLQ empty). The exit code is **143**: Nest re-raises the signal after its hooks finish, so 143 is the graceful exit, not a kill. A deploy that sends `SIGTERM` must wait longer than the lock timeout (5 s) plus a commit before `SIGKILL`; Docker's default of 10 s is enough. Automated since phase 8 by `multi/shutdown.spec.ts` (real `SIGTERM`, exit 143), which since D19 runs the instances under bun and still passes. An idle stop (`docker compose stop`, consumer in its 20 s long poll) exits in 0.5 s with code 0.
 - Pending-reference retries do not queue an event per attempt; only the first and the final rejection are visible to subscribers.
 
 ## Multi-instance correctness [8, 13] (eliminatory: "correct only with one instance")
@@ -266,7 +267,7 @@ Unknown means transient: a wrong "transient" only retries, a wrong "permanent" s
 
 The timers' "skip the beat while the previous tick runs" only avoids overlap inside one process; across processes the database does that job, which is why two publishers or workers are safe.
 
-**Proof, not a claim** (`bun run test:multi`, `tests.md`): three real `node dist/main.js` processes on one database and one queue. The wallet lock was removed once on a local branch to show the HTTP race test fails without it (3 `PROCESSED` instead of 10, 503 on the replays).
+**Proof, not a claim** (`bun run test:multi`, `tests.md`): three real `bun dist/main.js` processes on one database and one queue (`node dist/main.js` before D19; both green). The wallet lock was removed once on a local branch to show the HTTP race test fails without it (3 `PROCESSED` instead of 10, 503 on the replays).
 
 **Not covered, and why.**
 - Several hosts or network partitions: all processes run on one machine against one Postgres. The mechanisms above do not depend on that, but it was not tested.
@@ -343,7 +344,7 @@ Stated as limitations, each with its ceiling and the way up.
 | Events are at least once and unordered | consumers must dedupe by `eventId` and not rely on order | per-aggregate sequence number (`walletVersion` is already in `WalletBalanceChanged`) |
 | Single currency exercised; partial reversals out of scope | `REVERSAL_AMOUNT_MISMATCH` rejects them | reversal amounts as a sum of linked entries |
 | The observed balance (`balance_after`) is persistence-only; the retry state adds two fields (`attempts`, `nextAttemptAt`) to the README `WagerTransaction` constructor | deviation from the skeleton | listed under "Deviations from the README skeletons" |
-| LocalStack pinned to 4.4 (newer tags need an auth token), Postgres 13 near end of life | no security patches | real SQS and a supported Postgres major |
+| LocalStack pinned to 4.4 (newer tags need an auth token), Postgres 13 out of community support since November 2025 | no security patches | real SQS and a supported Postgres major |
 | Tests ran on one machine against one Postgres | shows correctness across processes, not across hosts or partitions | repeat `test:multi` against a staging cluster |
 
 ## Considered, not implemented
@@ -359,6 +360,13 @@ The project asks for these to be named even when not built.
 - **OpenTelemetry and a dashboard** (optional in the README); `/metrics` and JSON logs are the supported surface.
 - **A DLQ redrive tool** that re-submits `FAILED` rows with a new key.
 - **A balance-equals-ledger constraint** in the database: reconciliation reports it instead (see "Schema notes"), because a deferred constraint costs a `SUM` on every write.
+
+## Runtime and test runner [4] (D19)
+
+| Decision | Choice | Rejected alternative and why | Consequence |
+|---|---|---|---|
+| D19 Runtime | **Bun 1.x runs the application**, the migrations, the load test and the multi-instance children: the image is `oven/bun:1`, `start:dev` is `nest start --watch --exec bun` (the Nest CLI only compiles and watches), `start:prod` is `bun dist/main.js`. Until 2026-10-22 the app ran on `node:22` with bun only as package manager; switching changed no source file | Staying on Node: the README §4 makes Bun the mandatory runtime | Checked on the switch: the Compose app boots under bun, the §8 race (100.00, two parallel 80.00) gives 200 + 422 and balance 20.00, `SIGTERM` still exits 143 after the in-flight message commits (`multi/shutdown.spec.ts`). bun loads `.env` by itself but never overrides a variable already set, so the Compose `DATABASE_URL` (host `db`) and the test databases still win |
+| D19 Test runner | **vitest, executed on the Bun runtime** (`bun --bun vitest run ...` behind every `bun run test*` script). Under `--bun` `process.execPath` is bun, so `test:multi` spawns `bun dist/main.js` children | `bun test`: the README names Bun as test runner, but porting meant rewriting `vi.*` mocks/spies, three configs with `globalSetup`, per-suite env (`WORKERS_ENABLED=false`, pool size) and the coverage setup for 661 tests on the deadline day, with no gain in what the tests prove | Every suite runs inside Bun (429 unit, 224 integration/e2e, 8 multi, all green under `--bun`). The deviation left is the runner API (vitest instead of `bun:test`); porting is mechanical if required. `test:debug` stays on Node (`--inspect-brk` is a Node inspector flag) |
 
 ## Documentation [14] (D16)
 

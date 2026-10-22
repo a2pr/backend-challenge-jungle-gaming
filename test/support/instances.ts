@@ -18,7 +18,7 @@ const BASE_PORT = 3101;
 let nextPort = BASE_PORT;                        // never reused inside a run, so a replacement cannot meet a dying predecessor on the same port
 let nextId = 1;
 
-// Real `node dist/main.js` processes: only separate processes prove there is no hidden shared memory.
+// Real `bun dist/main.js` processes (process.execPath is bun under `bun --bun vitest`): only separate processes prove there is no hidden shared memory.
 // They share what the test process has in env (DATABASE_URL = the test database, AWS_*) and the throwaway queues in `opts.queues`.
 export async function startInstances(count = Number(process.env.TESTING_MULTIPLE_INSTANCES ?? 3), opts: InstancesOptions = {}): Promise<Instances> {
     const instances = Array.from({length: count}, () => spawnInstance(nextPort++, nextId++, opts));

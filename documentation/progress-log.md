@@ -11,19 +11,20 @@ Status against the README (`README.md`, section numbers in brackets). Final stat
 | Idempotency (15) | done: persistent keys, replay, payload conflict, cross-channel | phase 4, `http.spec.ts`, `consumer.spec.ts` |
 | Messaging and failures (15) | done: inbox, outbox, retry, DLQ, crash recovery, graceful shutdown | phases 6 and 7 |
 | Modelling and architecture (10) | done with a stated cut: invariants in domain classes, no ports (D11) | `ARCHITECTURE.md` |
-| Tests (10) | done: unit, real Postgres and SQS integration, races, multi-instance; no load test | `tests.md` |
+| Tests (10) | done: unit, real Postgres and SQS integration, races, multi-instance, all on the Bun runtime; load test (`test:load`) as the optional extra | `tests.md`, `load-test.md` |
 | Observability (5) | done: JSON logs with allow-list, `/metrics`, health, outbox lag | phase 9 |
 | Documentation (5) | done: README setup, `ARCHITECTURE.md`, `tests.md`, `deployment.md`, `taxonomy.md`, Postman | phase 10 |
 | Auth (0) | not implemented by design: no-op `AuthGuard` (D15) | `ARCHITECTURE.md` |
+| Stack (§4) | Bun runs the app, migrations and tests (D19); vitest kept as runner API | `ARCHITECTURE.md`, "Runtime and test runner" |
 
-Cut or not built (all listed with ceilings in `ARCHITECTURE.md`, "Limitations" and "Considered, not implemented"): load test, repository ports, outbox lease/reaper, inbox/outbox retention, real identity provider, hot-wallet partitioning, per-instance metric label.
+Cut or not built (all listed with ceilings in `ARCHITECTURE.md`, "Limitations" and "Considered, not implemented"): repository ports, outbox lease/reaper, inbox/outbox retention, real identity provider, hot-wallet partitioning, a multi-instance load test, `bun test` as runner. Built after the first cut list: the load test and the instance id label (see "Extras").
 
 ## Baseline (phase 0)
 
 | Area | What exists | Where |
 |---|---|---|
 | Project skeleton | NestJS 12, TypeScript strict, ESM (`nodenext`), vitest, oxlint | `package.json`, `tsconfig.json` |
-| Package manager | bun as package manager/script runner; Nest still runs on Node | `bun.lock`, `Dockerfile` |
+| Package manager | bun as package manager/script runner; Nest ran on Node until the D19 switch (see "Bun runtime" at the end) | `bun.lock`, `Dockerfile` |
 | Docker Compose | `nest-app` (live reload via bind mount), `db` (postgres:13), `localstack` (SQS only) | `docker-compose.yaml` |
 | ORM wiring | MikroORM v7 + `@mikro-orm/nestjs`, explicit entity list | `src/mikro-orm.config.ts` |
 | Health checks | `/health/live` always 200; `/health/ready` probes Postgres and the SQS queue, 2 s timeout each | `src/health.*.ts` |
@@ -257,7 +258,7 @@ Differences from the phase document:
 Decisions: see "Observability" in `ARCHITECTURE.md`.
 
 Open items:
-- No `instance` metric label (the scraper adds one); `INSTANCE_ID` is only in the startup log line.
+- ~~No `instance` metric label; `INSTANCE_ID` only in the startup log line.~~ Closed by "Extras": `instanceId` on every log line, `instance_id` on every metric.
 - Consumer received/acked counts and the 5xx stack in JSON mode were not checked beyond the unit test.
 
 ## Phase 10: documentation (done 2026-10-22)
@@ -283,13 +284,30 @@ Not run: the dry run was on the same machine and the same Docker daemon, so it d
 
 ## Instance id (2026-10-22)
 
-`main.ts` logs `{"event":"app.started","instanceId":...,"port":...}` once, after `listen`. `instanceId` is `INSTANCE_ID` or the hostname. Every JSON line already has `pid`, so the startup line is the key that attributes the rest. `LogFields` gained `instanceId` and `port`; `multi/smoke.spec.ts` asserts each child logs its own id. Not done: the id on every line, or as a metric label.
+`main.ts` logs `{"event":"app.started","instanceId":...,"port":...}` once, after `listen`. `instanceId` is `INSTANCE_ID` or the hostname. Every JSON line already has `pid`, so the startup line is the key that attributes the rest. `LogFields` gained `instanceId` and `port`; `multi/smoke.spec.ts` asserts each child logs its own id. Not done at that point: the id on every line, or as a metric label (both done later, see "Extras").
 
 ## Extras (2026-10-22)
 
 - **Retry counters at 0:** the three `wager_retries_total` sources are exported from start (`MetricsService` constructor), tested in `metrics.e2e-spec.ts`.
 - **Instance id everywhere:** `src/observability/instance.ts`; `logEvent` adds `instanceId` to every line, the registry adds the `instance_id` label to every metric (not `instance`, which Prometheus owns). `app.started` logs it with the port. The two log-shape tests were updated.
 - **Load test:** `bun run test:load` (`test/load/run.ts`, `autocannon` and `@types/autocannon` as dev dependencies), results and analysis in `load-test.md`. Finding: the outbox publisher's ceiling is about 50 events/s (one batch of 50 per tick), so the sustainable rate is about 25 tx/s; the HTTP path itself did 240-270 req/s on one hot wallet and 440-470 over 200 wallets with 0 errors and the ledger invariant intact. Recorded as a limitation with ways up; the publisher was not changed.
+
+## Bun runtime (D19, 2026-10-22)
+
+Evaluation against README §4 found the app running on `node:22` with bun only as package manager, while §4 makes Bun the mandatory runtime and test runner. Changed, no source file touched:
+
+| File | Change |
+|---|---|
+| `Dockerfile` | `FROM oven/bun:1` instead of `node:22` + copied bun binary |
+| `docker-compose.yaml` | `user: bun` (uid 1000, same as `node` before, so host `dist/` stays writable) |
+| `package.json` | `start` / `start:dev` add `--exec bun`; `start:prod` is `bun dist/main.js`; `test`, `test:watch`, `test:cov`, `test:e2e`, `test:multi` run `bun --bun vitest` |
+| `test/support/instances.ts` | comment only: children are `bun dist/main.js` because `process.execPath` is bun under `--bun` |
+
+Checked: the container process is `bun --enable-source-maps dist/main`; `/health/ready` 200; the §8 race on the Compose app (200 + 422, balance 20.00, reconciliation consistent, outbox drained); `bun dist/main.js` on the host; `bun run test` 429, `bun run test:e2e` 224, `bun run test:multi` 8 (children seen as `bun dist/main.js`, `SIGTERM` still 143). `load-test.md` figures were measured on Node and not re-run. Decision and the kept deviation (vitest API instead of `bun:test`) in `ARCHITECTURE.md`, D19.
+
+## Documentation consistency pass (2026-10-22)
+
+Fixed contradictions a reviewer would hit: this log's final table said "no load test" and listed the load test and the instance label as cut; the phase 9 and "Instance id" open items were stale; `ARCHITECTURE.md` said `Money.from` accepts negatives (the code and the "Deviations" table reject them); "Postgres 13 near end of life" (out of support since November 2025); README and `deployment.md` showed a JSON body for `/health/ready` (it answers `OK`; the JSON is only in the 503 details); `deployment.md` said graceful shutdown was not enabled (it is); the e2e count is 224.
 
 ## Known issues and risks
 

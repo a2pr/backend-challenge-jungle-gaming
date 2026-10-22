@@ -1,14 +1,14 @@
 # Tests
 
-Three vitest configs (unit, integration/e2e, multi-instance), one database. `bun` must be on PATH; if it is not, prefix the commands with `bunx` as below.
+Three vitest configs (unit, integration/e2e, multi-instance), one database. Every `bun run test*` script runs vitest **on the Bun runtime** (`bun --bun vitest ...`, D19 in `ARCHITECTURE.md`). `bun` must be on PATH; if it is not, prefix the commands with `bunx` as below.
 
 | Command | What runs | Needs |
 |---|---|---|
 | `bun run test` | unit specs: `src/**/*.spec.ts`, `test/unit/**` (domain, events, errors, domain purity) | nothing |
 | `bun run test:e2e` | `test/integration/**` and `test/e2e/**` against real Postgres and LocalStack | `docker compose up -d db localstack` (wait until LocalStack is `healthy`) and `DATABASE_URL_TEST`, `AWS_*` and the queue URLs in `.env` (see `.env.example`) |
-| `bun run test:multi` | `test/integration/multi/**`: 3 real `node dist/main.js` processes sharing one database and one queue (HTTP race, consumers, publishers, `SIGKILL` restart, `SIGTERM`); builds `dist/` first if it is stale | `docker compose up -d db localstack` only, see "Multi-instance tests" below |
+| `bun run test:multi` | `test/integration/multi/**`: 3 real `bun dist/main.js` processes sharing one database and one queue (HTTP race, consumers, publishers, `SIGKILL` restart, `SIGTERM`); builds `dist/` first if it is stale | `docker compose up -d db localstack` only, see "Multi-instance tests" below |
 | `bun run test:load` | `test/load/run.ts` (autocannon) against the **running** app (`LOAD_URL`, default `http://localhost:3000`): hot wallet and many wallets; prints latency percentiles, error rate, lock-wait quantiles from `/metrics` and outbox lag; **not** part of the suite | the Compose stack up and migrated. It writes wallets and transactions into that app's database: `docker compose down -v` resets it. Knobs: `LOAD_DURATION` (15 s), `LOAD_CONNECTIONS` (50), `LOAD_WALLETS` (200). Results and method: `load-test.md` |
-| `bunx vitest run --config ./vitest.config.experiments.ts` | `test/experiments/**`: the contention experiment (D1), prints a markdown table; **not** part of the suite | same as e2e |
+| `bun --bun vitest run --config ./vitest.config.experiments.ts` | `test/experiments/**`: the contention experiment (D1), prints a markdown table; **not** part of the suite | same as e2e |
 | `bunx tsc --noEmit`, `bunx oxlint src/ test/`, `bun run build` | types, lint, compile | nothing |
 
 ## Coverage
@@ -32,10 +32,10 @@ Three vitest configs (unit, integration/e2e, multi-instance), one database. `bun
 Races are only trustworthy if they pass every time:
 
 ```bash
-for i in 1 2 3; do bunx vitest run --config ./vitest.config.e2e.ts; done
+for i in 1 2 3; do bun --bun vitest run --config ./vitest.config.e2e.ts; done
 ```
 
-If one run differs, run the failing file alone 20 times (`for i in $(seq 20); do bunx vitest run --config ./vitest.config.e2e.ts test/integration/<file>; done`) to tell a code bug from a test bug. `maxInFlight > 1` in `concurrency.spec.ts` proves the calls overlapped.
+If one run differs, run the failing file alone 20 times (`for i in $(seq 20); do bun --bun vitest run --config ./vitest.config.e2e.ts test/integration/<file>; done`) to tell a code bug from a test bug. `maxInFlight > 1` in `concurrency.spec.ts` proves the calls overlapped.
 
 ## Where the numbered tests live
 
@@ -57,7 +57,7 @@ If one run differs, run the failing file alone 20 times (`for i in $(seq 20); do
 | `/metrics`: names, counters, histograms, outbox lag gauge | `test/e2e/metrics.e2e-spec.ts` |
 | log allow-list (`logEvent`) | `test/unit/logEvent.spec.ts` |
 
-Current state (2026-10-22): 429 unit, 223 integration and e2e, 8 multi-instance, green runs of each.
+Current state (2026-10-22, on the Bun runtime): 429 unit, 224 integration and e2e, 8 multi-instance, green runs of each.
 
 The outbox tests create uniquely named throwaway queues with a 2 s visibility timeout (`test/support/sqs.ts`), never the compose queues, and `vitest.config.e2e.ts` sets `WORKERS_ENABLED=false` so booting the app in a test does not start the publisher timer.
 
@@ -71,7 +71,7 @@ bun run test:multi                     # about 26 s for the whole set
 ```
 
 **How docker-compose has to be run for this.**
-- Only `db` and `localstack` are needed. The test starts the app instances itself as child processes on the host (`node dist/main.js`, ports 3101, 3102, ...), so they use `localhost:5432` and `localhost:4566` from `.env`.
+- Only `db` and `localstack` are needed. The test starts the app instances itself as child processes on the host (`bun dist/main.js`: `process.execPath` under `bun --bun`; ports 3101, 3102, ...), so they use `localhost:5432` and `localhost:4566` from `.env`.
 - `nest-app` can stay up or be stopped; it does not interfere: it uses the `nest` database and the compose queues, the tests use `nest_test` and throwaway queues (`test-...-<random>`, 2 s visibility timeout). It only costs CPU while the instances run, so stop it for the cleanest timings: `docker compose stop nest-app`.
 - `.env` must define `DATABASE_URL_TEST`, the `AWS_*` variables and the three queue URLs (as for `test:e2e`). `TESTING_MULTIPLE_INSTANCES=3` sets the default number of instances.
 - Free host ports 3101 and up (one per instance; a replacement instance takes the next free number, ports are not reused inside a run).

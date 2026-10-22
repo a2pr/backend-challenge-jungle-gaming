@@ -4,21 +4,21 @@
 
 The challenge text starts below. This section is how to run the solution; the reasoning is in [`documentation/ARCHITECTURE.md`](documentation/ARCHITECTURE.md).
 
-**Prerequisites:** Docker with the Compose plugin, [bun](https://bun.sh) >= 1.4 (host scripts and tests only), free ports 3000, 5432, 4566.
+**Prerequisites:** Docker with the Compose plugin, [bun](https://bun.sh) >= 1.4 on the host (tests and scripts; the app container is `oven/bun:1`), free ports 3000, 5432, 4566. Bun is the runtime of the app, the migrations and the tests (D19 in `ARCHITECTURE.md`).
 
 ```bash
 cp .env.example .env                                  # local values; .env is git-ignored
 bun install                                           # FIRST: if Compose starts first, Docker creates node_modules/ as root and bun install fails with EACCES
 docker compose up -d --build                          # app :3000, Postgres :5432, LocalStack (queues are created on start)
 docker compose exec nest-app bun run migration:up     # the app never migrates on boot
-curl localhost:3000/health/ready                      # {"postgres":true,"sqs":true}
+curl localhost:3000/health/ready                      # 200 OK; 503 with {"postgres":..,"sqs":..} in details when one is down
 curl localhost:3000/metrics                           # Prometheus text
 ```
 
 ```bash
-bun run test                                          # unit tests, no infrastructure
+bun run test                                          # unit tests, no infrastructure (vitest on the bun runtime)
 bun run test:e2e                                      # integration + HTTP against real Postgres and LocalStack
-bun run test:multi                                    # 3 real processes on one database and queue (builds dist/ if stale)
+bun run test:multi                                    # 3 real `bun dist/main.js` processes on one database and queue (builds dist/ if stale)
 bun run test:load                                     # load test against the running app on :3000; writes data, see documentation/load-test.md
 ```
 

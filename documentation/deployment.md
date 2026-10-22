@@ -45,7 +45,7 @@ The app never migrates on boot, so until `migration:up` runs every wallet reques
 
 | Service | Image | Notes |
 |---|---|---|
-| `nest-app` | built from `Dockerfile` (node:22 + bun) | runs `bun run start:dev`, source bind-mounted, reloads on save, runs as uid 1000 |
+| `nest-app` | built from `Dockerfile` (`oven/bun:1`) | runs `bun run start:dev` (`nest start --watch --exec bun`: the app process is bun, D19), source bind-mounted, reloads on save, runs as user `bun` (uid 1000) |
 | `db` | `postgres:13` | data in volume `postgres-data` |
 | `localstack` | `localstack/localstack:4.4` | `SERVICES=sqs`, data in volume `localstack-data` |
 
@@ -53,7 +53,7 @@ The app never migrates on boot, so until `migration:up` runs every wallet reques
 
 ```bash
 curl -i localhost:3000/health/live    # 200 OK
-curl -i localhost:3000/health/ready   # 200 {"postgres":true,"sqs":true}
+curl -i localhost:3000/health/ready   # 200 OK
 curl localhost:3000/metrics           # Prometheus text: wager_*, wallet_lock_wait_seconds, outbox_lag_seconds
 ```
 
@@ -88,8 +88,8 @@ Correctness does not depend on the instance count (`ARCHITECTURE.md`, "Multi-ins
 
 ```bash
 docker compose up -d --build                      # instance 1, :3000 (dist/ is built by its watcher)
-docker compose run -d --no-deps --name app-2 -p 3001:3000 nest-app node dist/main.js
-docker compose run -d --no-deps --name app-3 -p 3002:3000 nest-app node dist/main.js
+docker compose run -d --no-deps --name app-2 -p 3001:3000 nest-app bun dist/main.js
+docker compose run -d --no-deps --name app-3 -p 3002:3000 nest-app bun dist/main.js
 for p in 3000 3001 3002; do curl -s -o /dev/null -w "$p %{http_code}\n" localhost:$p/health/ready; done   # 200 x3
 ```
 
@@ -125,7 +125,7 @@ docker compose exec nest-app bun run migration:up       # applies all pending
 docker compose exec nest-app bun run migration:down     # reverts the LAST migration only
 ```
 
-- On the host, `bun run build` first, then `bun run migration:up`. The scripts run under bun (not `node`) on purpose: bun reads `.env` and expands its `${...}` values, while plain `node` sees no `DATABASE_URL` and fails with `No database specified`.
+- On the host, `bun run build` first, then `bun run migration:up`. The scripts run under bun on purpose: bun reads `.env` and expands its `${...}` values (plain `node` would see no `DATABASE_URL` and fail with `No database specified`). The app itself runs under bun too (D19); a variable already set in the environment always wins over `.env`.
 - Applied migrations are recorded in the `mikro_orm_migrations` table; running `up` twice is a no-op.
 - Inside Compose the app reaches Postgres at host `db`: `docker-compose.yaml` builds `DATABASE_URL` for `nest-app` itself, because `.env` uses `localhost` for commands run from the host (tests, migrations). A fresh database has no tables until `migration:up` runs; until then every wallet request answers 503.
 - `down` drops the tables and data. It exists for development and the `up, down, up` test, not for production rollbacks.
@@ -140,9 +140,9 @@ docker compose exec nest-app bun run migration:down     # reverts the LAST migra
 
 ## Production considerations (not implemented)
 
-- The current `Dockerfile` is dev-only (`start:dev`, bind mount, dev dependencies). Production needs a multi-stage build, `bun install --production`, `node dist/main`, and no bind mount.
+- The current `Dockerfile` is dev-only (`start:dev`, bind mount, dev dependencies). Production needs a multi-stage build on `oven/bun:1`, `bun install --production`, `bun dist/main.js` (`bun run start:prod`), and no bind mount.
 - Replace LocalStack with real SQS: drop `AWS_ENDPOINT_URL_SQS` and the dummy keys, use an IAM role; `new SQSClient()` already reads them from the environment.
 - Run migrations as a separate release step (job), not on app boot, since several instances start together.
-- Postgres: managed instance, secrets from a secret manager instead of `.env`, `postgres:13` is near end of life, move to a supported major.
+- Postgres: managed instance, secrets from a secret manager instead of `.env`, `postgres:13` has been out of community support since November 2025, move to a supported major (the schema uses nothing version-specific).
 - Point the orchestrator's liveness probe at `/health/live` and readiness at `/health/ready`.
-- Graceful shutdown (`app.enableShutdownHooks()`) is not enabled; the README expects in-flight SQS messages to be handled on shutdown.
+- Graceful shutdown is implemented (`app.enableShutdownHooks()`, `beforeApplicationShutdown` in the consumer and workers, `ARCHITECTURE.md`); give the orchestrator a stop grace period above the 5 s lock timeout plus a commit (Docker's default 10 s is enough).

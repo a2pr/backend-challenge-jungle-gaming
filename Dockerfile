@@ -1,8 +1,6 @@
-FROM node:22
+FROM oven/bun:1
 
-# bun as package manager only; nest still runs on node
-COPY --from=oven/bun:1 /usr/local/bin/bun /usr/local/bin/bun
-
+# bun is the runtime, package manager and script runner (README §4); the nest CLI only compiles and watches
 WORKDIR /usr/src/app
 
 COPY package.json bun.lock ./
