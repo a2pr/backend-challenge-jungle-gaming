@@ -45,4 +45,29 @@ export class WagerTransactionRepository {
     async insert(em: EntityManager, tx: WagerTransaction, extras: { balanceAfter: string }): Promise<void> {
         await em.insert(WagerTransactionRow, toRow(tx, extras));
     }
+
+    // The pending row after a retry: only the columns a transition can change.
+    async update(em: EntityManager, tx: WagerTransaction, extras: { balanceAfter: string }): Promise<void> {
+        const row = toRow(tx, extras);
+        const updated = await em.nativeUpdate(WagerTransactionRow, {id: row.id}, {
+            status: row.status, failureCode: row.failureCode, referenceTransactionId: row.referenceTransactionId,
+            processedAt: row.processedAt, attempts: row.attempts, nextAttemptAt: row.nextAttemptAt, balanceAfter: row.balanceAfter,
+        });
+        if (updated !== 1) throw new Error(`Wager transaction ${row.id} not found`);
+    }
+
+    // Ids only: reprocess takes the wallet lock itself, so no row lock is held here across wallets (lock order).
+    // Must run inside em.transactional; the locks end with that transaction.
+    async findDuePendingReference(em: EntityManager, now: Date, limit: number): Promise<string[]> {
+        const rows: { id: string }[] = await em.getConnection().execute(
+            `SELECT id FROM wager_transactions
+             WHERE status = 'PENDING_REFERENCE' AND next_attempt_at <= ?
+             ORDER BY next_attempt_at LIMIT ?
+             FOR UPDATE SKIP LOCKED`,
+            [now, limit],
+            'all',
+            em.getTransactionContext(), // join the caller's transaction, or the lock is released at once
+        );
+        return rows.map((r) => r.id);
+    }
 }

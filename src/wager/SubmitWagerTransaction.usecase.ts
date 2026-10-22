@@ -125,11 +125,7 @@ export class SubmitWagerTransactionUseCase {
 
     private async process(tx: EntityManager, input: RunInput): Promise<SubmitWagerOutcome> {
         const {command, transactionId, correlationId, causationId, now} = input
-        // Raw SQL: pass the transaction context or it runs on another connection.
-        await tx.getConnection().execute(`SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'`, [], 'run', tx.getTransactionContext())
-
-        // First statement on the data: serialises everything for this wallet.
-        const wallet = await this.walletRepo.lockById(tx, command.walletId)
+        const wallet = await this.lockWallet(tx, command.walletId)
         if (!wallet) throw new WalletNotFoundError(command.walletId)
 
         // A bad request throws here, before any write.
@@ -158,20 +154,36 @@ export class SubmitWagerTransactionUseCase {
         }
 
 
-        let entry: WalletLedgerEntry | undefined
-        const walletFailure = this.checkWallet(wallet, wager)
-        if (walletFailure) {
-            wager.reject(walletFailure)
-        } else {
-            const ref = await this.resolveReference(tx, wager)
-            if (ref.kind === 'rejected') wager.reject(ref.code)
-            else if (ref.kind === 'pending') wager.markPendingReference(now)
-            else entry = this.apply(wallet, wager, ref.kind === 'found' ? ref.reference : undefined, now)
-        }
+        const entry = await this.decide(tx, wallet, wager, now)
 
         const events = this.buildEvents(wallet, wager, entry, correlationId, causationId, now)
         await this.persist(tx, wallet, wager, entry, events)
         return this.toResult(wager, wallet.balance, false)
+    }
+
+    // First statement on the data: serialises everything for this wallet. Null when the wallet does not exist.
+    private async lockWallet(tx: EntityManager, walletId: string): Promise<Wallet | null> {
+        // Raw SQL: pass the transaction context or it runs on another connection.
+        await tx.getConnection().execute(`SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'`, [], 'run', tx.getTransactionContext())
+        return this.walletRepo.lockById(tx, walletId)
+    }
+
+    // The one place that decides a transaction's outcome, shared by execute and reprocess (HTTP, queue and worker cannot drift).
+    // Mutates wager (and wallet when money moves); returns the ledger entry when there is one.
+    private async decide(tx: EntityManager, wallet: Wallet, wager: WagerTransaction, now: Date): Promise<WalletLedgerEntry | undefined> {
+        const walletFailure = this.checkWallet(wallet, wager)
+        if (walletFailure) {
+            wager.reject(walletFailure)
+            return undefined
+        }
+        const ref = await this.resolveReference(tx, wager)
+        if (ref.kind === 'rejected') wager.reject(ref.code)
+        else if (ref.kind === 'pending') {
+            // a first attempt is never at the limit; a retry that reaches it gives up (D3)
+            if (wager.retryLimitReached()) wager.reject(FailureCode.ReferenceNotFound)
+            else wager.markPendingReference(now)
+        } else return this.apply(wallet, wager, ref.kind === 'found' ? ref.reference : undefined, now)
+        return undefined
     }
 
     private buildTransaction(command: SubmitWagerCommand, id: string, now: Date): WagerTransaction {
@@ -227,10 +239,12 @@ export class SubmitWagerTransactionUseCase {
         }
     }
 
-    private async persist(tx: EntityManager, wallet: Wallet, wager: WagerTransaction, entry: WalletLedgerEntry | undefined, events: IntegrationEvent<unknown>[]): Promise<void> {
+    private async persist(tx: EntityManager, wallet: Wallet, wager: WagerTransaction, entry: WalletLedgerEntry | undefined, events: IntegrationEvent<unknown>[], exists = false): Promise<void> {
         if (entry) await this.walletRepo.save(tx, wallet)
         // The ledger row references the transaction row, so the transaction goes first.
-        await this.wagerTransactionRepo.insert(tx, wager, {balanceAfter: wallet.balance.toString()})
+        const extras = {balanceAfter: wallet.balance.toString()}
+        if (exists) await this.wagerTransactionRepo.update(tx, wager, extras)
+        else await this.wagerTransactionRepo.insert(tx, wager, extras)
         if (entry) await this.walletLedgerRepo.insert(tx, entry)
         await this.outboxRepo.enqueue(tx, events)
     }
@@ -272,5 +286,43 @@ export class SubmitWagerTransactionUseCase {
             return {kind: 'rejected', code: FailureCode.AlreadyReversed}
         }
         return {kind: 'found', reference}
+    }
+
+    // D8: a well-formed message failed on its last receive. Own transaction, after the first one rolled back, so it only
+    // sees committed state. Evidence only: no ledger entry, no event. Unknown wallet: nothing (that message is permanent).
+    async recordFailure(command: SubmitWagerCommand, failureCode: FailureCode = FailureCode.ProcessingError): Promise<void> {
+        await this.orm.em.fork().transactional(async (tx) => {
+            const wallet = await this.lockWallet(tx, command.walletId)
+            if (!wallet) return
+            // the business call may have committed before the error surfaced, or an earlier receive already recorded this
+            if (await this.wagerTransactionRepo.findByIdempotencyKey(tx, command.providerId, command.idempotencyKey)) return
+            if (await this.wagerTransactionRepo.findByExternalId(tx, command.providerId, command.externalTransactionId)) return
+
+            const wager = this.buildTransaction(command, randomUUID(), new Date())
+            wager.fail(failureCode)
+            await this.wagerTransactionRepo.insert(tx, wager, {balanceAfter: wallet.balance.toString()})
+        })
+    }
+
+    // D3, D18: re-run a PENDING_REFERENCE transaction whose reference may have arrived. One transaction per row.
+    async reprocess(transactionId: string, now = new Date()): Promise<void> {
+        // Peek outside the transaction: the wallet id is needed to take the lock first (lock order: wallet, then rows).
+        const peek = await this.wagerTransactionRepo.findById(this.orm.em.fork(), transactionId)
+        if (!peek) return
+
+        await this.orm.em.fork().transactional(async (tx) => {
+            const wallet = await this.lockWallet(tx, peek.transaction.walletId)
+            if (!wallet) return
+            // Re-read under the lock: a concurrent reprocess may have finished it, and the second one has nothing to do.
+            const stored = await this.wagerTransactionRepo.findById(tx, transactionId)
+            const wager = stored?.transaction
+            if (!wager || wager.status !== WagerTransactionStatus.PendingReference) return
+
+            const entry = await this.decide(tx, wallet, wager, now)
+            // Still pending: the event went out on the first attempt, only the timeline moves.
+            const events = wager.status === WagerTransactionStatus.PendingReference ? []
+                : this.buildEvents(wallet, wager, entry, randomUUID(), undefined, now)
+            await this.persist(tx, wallet, wager, entry, events, true)
+        })
     }
 }
