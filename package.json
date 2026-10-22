@@ -23,7 +23,8 @@
     "migration:up": "bun dist/migrate.js up",
     "migration:down": "bun dist/migrate.js down",
     "migration:status": "bun dist/migrate.js status",
-    "test:e2e": "vitest run --config ./vitest.config.e2e.ts"
+    "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
+    "test:multi": "vitest run --config ./vitest.config.multi.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sqs": "^3.1153.0",

@@ -6,7 +6,7 @@ Everything runs through Docker Compose. Only the local/dev setup exists today; t
 
 - Docker with the Compose plugin
 - bun >= 1.4 (only for running scripts/tests on the host; the containers install their own)
-- Free host ports: 3000 (API), 5432 (Postgres), 4566 and 4510-4559 (LocalStack, bound to 127.0.0.1)
+- Free host ports: 3000 (API), 5432 (Postgres), 4566 and 4510-4559 (LocalStack, bound to 127.0.0.1); 3001, 3002 for the manual multi-instance check and 3101 and up for `bun run test:multi`
 
 ## Environment
 
@@ -61,6 +61,42 @@ docker compose down -v            # also wipe Postgres and LocalStack volumes
 ```bash
 docker compose up -d --build -V nest-app
 ```
+
+## Running several instances
+
+Correctness does not depend on the instance count (`ARCHITECTURE.md`, "Multi-instance correctness"). Two ways to see it.
+
+**Automated, three real processes:** `docker compose up -d db localstack`, then `bun run test:multi` (`tests.md`, "Multi-instance tests"). The test starts the instances on the host and uses throwaway queues; the `nest-app` container is not needed.
+
+**By hand, three containers against the compose stack.** `docker-compose.yaml` publishes a fixed `3000:3000`, so `--scale nest-app=3` fails on the port; extra instances are started with `docker compose run`, each with its own host port and the compiled `dist/` (not `start:dev`: several watchers would each delete and rebuild `dist/`):
+
+```bash
+docker compose up -d --build                      # instance 1, :3000 (dist/ is built by its watcher)
+docker compose run -d --no-deps --name app-2 -p 3001:3000 nest-app node dist/main.js
+docker compose run -d --no-deps --name app-3 -p 3002:3000 nest-app node dist/main.js
+for p in 3000 3001 3002; do curl -s -o /dev/null -w "$p %{http_code}\n" localhost:$p/health/ready; done   # 200 x3
+```
+
+All three share the `nest` database and the compose queues, and all three run the consumer and the publishers. Then race one wallet from the host, spreading the calls over the ports:
+
+```bash
+PID=$(cat /proc/sys/kernel/random/uuid)
+W=$(curl -s -XPOST localhost:3000/wallets -H 'content-type: application/json' \
+    -d "{\"playerId\":\"$PID\",\"initialBalance\":{\"amount\":\"100.00\",\"currency\":\"BRL\"}}" | sed 's/.*"id":"\([^"]*\)".*/\1/')
+ports=(3000 3001 3002)
+for i in $(seq 1 30); do
+  U=$(cat /proc/sys/kernel/random/uuid)
+  curl -s -o /dev/null -w "%{http_code}\n" -XPOST localhost:${ports[$((i%3))]}/wagering/transactions \
+    -H 'content-type: application/json' -H "Idempotency-Key: man-$U" \
+    -d "{\"providerId\":\"p\",\"externalTransactionId\":\"e-$U\",\"playerId\":\"$PID\",\"walletId\":\"$W\",\"roundId\":\"r\",\"gameId\":\"g\",\"kind\":\"BET\",\"money\":{\"amount\":\"10.00\",\"currency\":\"BRL\"}}" &
+done | sort | uniq -c
+curl -s -XPOST localhost:3001/wallets/$W/reconciliation     # consistent: true, stored 0.00
+docker rm -f app-2 app-3                                     # clean up
+```
+
+Expected (tried 2026-10-21): `10 200` and `20 422`, reconciliation `consistent: true`, balance `0.00`, 11 ledger entries (opening credit plus 10 debits). To see a restart, `docker kill app-2` in the middle of a send loop and start it again; the outbox and the queue drain on the remaining instances.
+
+Production notes: run migrations once as a release step before starting several instances; give each instance the same `DATABASE_URL` and queue URLs; keep `DATABASE_POOL_MAX` times the instance count under Postgres `max_connections`.
 
 ## Database migrations
 

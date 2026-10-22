@@ -236,3 +236,29 @@ Unknown means transient: a wrong "transient" only retries, a wrong "permanent" s
 - `recordFailure` can still fail with a unique violation if the same key races on another wallet; the consumer then leaves the message and SQS redrives it.
 - **`SIGTERM` was checked with a real process, mid-message** (2026-10-21, `node dist/main`, throwaway queues, `WORKERS_ENABLED=true`). Another `psql` session held the wallet row lock for about 4 s so the first of three queued messages was stuck mid-handling; `SIGTERM` was sent then. The process stayed alive until the lock released (about 1.6 s), the message committed (`PROCESSED`, balance 90.00, ledger sum 90.00) and was deleted, and the other two became visible at once (0 in flight, DLQ empty). The exit code is **143**: Nest re-raises the signal after its hooks finish, so 143 is the graceful exit, not a kill. A deploy that sends `SIGTERM` must wait longer than the lock timeout (5 s) plus a commit before `SIGKILL`; Docker's default of 10 s is enough. Not automated: the `app.close()` test in `consumer.spec.ts` covers the same path without a signal. An idle stop (`docker compose stop`, consumer in its 20 s long poll) exits in 0.5 s with code 0.
 - Pending-reference retries do not queue an event per attempt; only the first and the final rejection are visible to subscribers.
+
+## Multi-instance correctness [8, 13] (eliminatory: "correct only with one instance")
+
+**Why the number of instances does not matter.** No instance keeps state that another one needs: there is no cache, no in-memory lock, no leader. Every guarantee is held by Postgres or SQS, so two processes are in the same situation as two concurrent requests in one process, which phase 4 already tested.
+
+| Risk with N instances | What prevents it | Where |
+|---|---|---|
+| Two debits race on one wallet, balance goes negative or a debit is lost | `SELECT ... FOR UPDATE` on the wallet row (`LockMode.PESSIMISTIC_WRITE`), `CHECK (balance >= 0)` and the `version` guard in `save` as the second net | `wallet.repository.ts`, migration |
+| Same transaction twice (HTTP retry, redelivery, two channels) | `UNIQUE (provider_id, idempotency_key)` and `UNIQUE (provider_id, external_transaction_id)`: the loser of the race gets the stored result back | migration, `SubmitWagerTransactionUseCase` |
+| Same queue message handled by two consumers | FIFO group (`walletId`) means one consumer holds a wallet's messages at a time; if it dies, the visibility timeout returns them and the inbox row `(consumer_name, message_id)` makes the second delivery a no-op | `wagerConsumer.ts`, `inbox_messages` |
+| Two publishers send the same event | `FOR UPDATE SKIP LOCKED` in `claimDue`: a publisher never sees rows another one has locked. A crash between `SendMessage` and commit re-sends (at-least-once); consumers dedupe by `eventId` | `outbox.repository.ts` |
+| Two pending-reference workers reprocess the same row | the worker claims ids only; `reprocess` re-reads under the wallet lock and returns if the row is no longer pending | `pendingReferenceWorker.ts` |
+| Instance dies mid-transaction | Postgres rolls the transaction back when the connection drops, which also releases the wallet lock; nothing was committed, nothing is half done | Postgres |
+| Instance dies after commit, before `DeleteMessage` | the message is redelivered after the visibility timeout; the inbox recognises it | `wagerConsumer.ts` |
+| Rolling deploy: `SIGTERM` | `beforeApplicationShutdown`: message in hand commits, unstarted ones are released at once | `ARCHITECTURE.md`, "Known limits" |
+
+The timers' "skip the beat while the previous tick runs" only avoids overlap inside one process; across processes the database does that job, which is why two publishers or workers are safe.
+
+**Proof, not a claim** (`bun run test:multi`, `tests.md`): three real `node dist/main.js` processes on one database and one queue. The wallet lock was removed once on a local branch to show the HTTP race test fails without it (3 `PROCESSED` instead of 10, 503 on the replays).
+
+**Not covered, and why.**
+- Several hosts or network partitions: all processes run on one machine against one Postgres. The mechanisms above do not depend on that, but it was not tested.
+- Postgres failover and SQS regional failure: out of scope for the challenge (README §2).
+- Hot wallet throughput does not scale with instances: the row lock serialises one wallet whatever the instance count (contention experiment, D1). More instances help many wallets, not one.
+- Connection budget: `DATABASE_POOL_MAX` times the instance count must stay under Postgres `max_connections` (the multi tests use 10 per instance).
+- `INSTANCE_ID` is not read by the application, so logs cannot yet say which instance handled what.

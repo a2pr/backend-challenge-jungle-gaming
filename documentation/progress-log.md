@@ -206,6 +206,36 @@ Open items:
 - Test queues now carry the real redrive policy; a test with the 6th receive waits about 13 s (the suite takes about 35 s for the consumer spec).
 - No metrics yet for received, acked, dead-lettered and failed counts (phase 9).
 
+## Phase 8: multi-instance and restart (done 2026-10-21)
+
+State: `bun run test:multi` 8 tests in 6 files, three runs in a row (about 26 s each); `bun run test` 427 and `bun run test:e2e` 220 still green; `tsc` and lint clean. No production code changed.
+
+| Step | State | Detail |
+|---|---|---|
+| 0 `startInstances`, build step, script | done | `test/support/instances.ts` (spawns `node dist/main.js`, per-instance output buffer, `/health/ready` polling with a 30 s deadline, `stop()` kills with `SIGKILL`), `test/support/globalSetupMulti.ts` (builds when `dist/` is stale), own config `vitest.config.multi.ts`, script `test:multi`; `test:e2e` now excludes `test/integration/multi` |
+| 1 HTTP race across 3 instances | done | `http.spec.ts`: 10 `PROCESSED` + 20 `INSUFFICIENT_FUNDS`; same key over 3 ports: one debit, 29 replays. Sabotage check done (wallet lock removed locally, both tests failed, reverted) |
+| 2 Consumers and publishers | done | `consumer.spec.ts` (200 messages, 20 wallets; cross-channel same key), `outbox.spec.ts` (300 rows, 3 publishers) |
+| 3 Restart (`SIGKILL`) | done | `restart.spec.ts`: 576 transactions, kill after 30 rows stored (landed at 35 to 42 rows with 12 to 21 messages in flight), replacement started, stored keys equal sent keys |
+| 4 `SIGTERM` | done | `shutdown.spec.ts`, exit status 143 (not 0, see below) |
+| 5 Close out | done | docs below; three green runs; manual three-container run tried by hand |
+
+Shared helpers: `test/support/multi.ts` (`waitUntil`, `newTx`, `toMessage`, `post`, `postWithRetry`, `waitForSettled`, `expectEveryEventPublished`, `useMultiInstances`).
+
+Differences from the phase document:
+- Separate `vitest.config.multi.ts` and `globalSetupMulti.ts` instead of reusing the e2e config: the e2e config would otherwise run the multi specs inside `test:e2e` and the build step would slow every e2e run. The build is done by the global setup only when `dist/` is stale, so `test:multi` does not call `bun run build`.
+- `SIGTERM` exits with status 143, not 0: Nest re-raises the signal after the hooks (already recorded in phase 7). The helper reports shell-style statuses (143, 137).
+- `instances.exited` resolves to a number (never `null`): a process killed by a signal is reported as 128 + signal.
+- The restart and shutdown load is sent in waves of 20 (queue) and 4 (HTTP) while the test watches the database; HTTP clients retry the same key on another instance, as a provider would after a dropped connection.
+
+Checked by hand: three containers (`docker compose run ... node dist/main.js` on :3001 and :3002 plus the compose app on :3000) against the dev database and compose queues: 30 BETs of 10.00 on 100.00 spread over the ports gave 10 x 200 and 20 x 422, reconciliation `consistent: true`. Procedure in `deployment.md`.
+
+Decisions: see "Multi-instance correctness" in `ARCHITECTURE.md`.
+
+Open items:
+- `INSTANCE_ID` is passed to the children but not read by the app; tests cannot assert that every instance did a share of the work.
+- Kill and `SIGTERM` timing is by database state, not by code line; which message the victim held is not controlled.
+- Single machine, single Postgres.
+
 ## WagerTransaction stubs: decisions deferred (superseded)
 
 **Superseded 2026-10-20:** every point below was decided (D1 to D11, D17, D18) and is written in `ARCHITECTURE.md` and `plan.md`. Kept only as history; delete when convenient. Original text:

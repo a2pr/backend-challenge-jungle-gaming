@@ -9,6 +9,7 @@ export default defineConfig({
     globals: true,
     root: './',
     include: ['test/e2e/**/*.e2e-spec.ts', 'test/integration/**/*.spec.ts'],
+    exclude: ['test/integration/multi/**', '**/node_modules/**'],   // real processes: bun run test:multi
     fileParallelism: false,
     globalSetup: ['test/support/globalSetup.ts'],
     testTimeout: 30000,
