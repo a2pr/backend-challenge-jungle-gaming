@@ -176,6 +176,33 @@ Open items for the next phases:
 - **Phase 9:** published and failed counters from `tick`'s result; a stuck-row alert (`attempts` high).
 - **Housekeeping:** an `Error: connection terminated unexpectedly` line is printed by one existing e2e spec on every run (the run still passes); not investigated.
 
+## Phase 7: consumer, inbox, pending-reference worker (done 2026-10-21)
+
+State: `bun run test` 427 passed, `bun run test:e2e` 220 passed (three runs in a row), `tsc`, `nest build` and lint clean.
+
+| Step | State | Detail |
+|---|---|---|
+| 0 Message schema, inbox class, helpers | done | `messageSchema.ts` (extends the HTTP schema, reuses its `toCommand`), `InboxMessage`, `sendWagerMessage` and `buildApp` in `test/support/sqs.ts` |
+| 1 Error classification | done | `classify` plus `InboxPayloadMismatchError`; table in `ARCHITECTURE.md` |
+| 2 `recordFailure` and `reprocess` | done | shared `decide` with `execute`; `findDuePendingReference` (`SKIP LOCKED`); `recordFailureReprocess.spec.ts` (11 tests) |
+| 3 `WagerConsumer.pollOnce` | done | ack after commit, permanent to DLQ, transient retried, last receive `recordFailure` then DLQ then delete |
+| 4 Graceful shutdown | done | `beforeApplicationShutdown`, aborted long poll, in-flight awaited, unstarted messages released with visibility 0 |
+| 5 `PendingReferenceWorker` and wiring | done | registered in `WalletModule`; timer and `WORKERS_ENABLED` switch like the publisher |
+| 6 Consumer tests | done | `consumer.spec.ts`, 14 tests against real SQS: duplicate delivery, crash after commit, malformed, unknown wallet, hash mismatch, business rejection, five-receive DLQ with `FAILED` and redrive, database down for `recordFailure`, failing DLQ send, shutdown mid-message, timer loop, `maxReceiveCount` equals the redrive policy |
+| 7 Pending-reference tests | done | `pendingReference.spec.ts`, 5 tests: both out-of-order flows, D3 timeline to `REFERENCE_NOT_FOUND`, concurrent ticks, one failing row |
+
+Checked by hand on the compose stack: one message sent to the real `wager-transactions.fifo` was consumed by the running `nest-app` (wallet 100.00 to 90.00); `docker compose stop nest-app` exited in 0.5 s with code 0.
+
+Decisions: see "SQS consumer, inbox and pending-reference worker" in `ARCHITECTURE.md`.
+
+Differences from the phase document: consumer and worker live in `WalletModule`; `pollOnce(waitSeconds = 20)` takes the wait so tests do not hold for 20 s; `beforeApplicationShutdown` instead of `OnApplicationShutdown`; the unstarted rest of a batch is handed back whenever a message stays (order per wallet); `InvalidWagerTransactionError` and `InvalidMovementError` are permanent; the inbox hash mismatch is now detected in the use case.
+
+Open items:
+
+- `OutboxPublisher` still closes on `onApplicationShutdown`; check it cannot race the ORM close.
+- Test queues now carry the real redrive policy; a test with the 6th receive waits about 13 s (the suite takes about 35 s for the consumer spec).
+- No metrics yet for received, acked, dead-lettered and failed counts (phase 9).
+
 ## WagerTransaction stubs: decisions deferred (superseded)
 
 **Superseded 2026-10-20:** every point below was decided (D1 to D11, D17, D18) and is written in `ARCHITECTURE.md` and `plan.md`. Kept only as history; delete when convenient. Original text:

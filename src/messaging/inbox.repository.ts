@@ -22,6 +22,15 @@ export class InboxRepository {
         return rows.length > 0;
     }
 
+    // Compared in SQL: payload_hash is char(64), so the stored value may come back space-padded.
+    async hasPayload(em: EntityManager, consumerName: string, messageId: string, payloadHash: string): Promise<boolean> {
+        const rows = await em.getConnection().execute(
+            `SELECT 1 FROM inbox_messages WHERE consumer_name = ? AND message_id = ? AND payload_hash = ?`,
+            [consumerName, messageId, payloadHash], 'all', em.getTransactionContext(),
+        );
+        return rows.length > 0;
+    }
+
     async markProcessed(em: EntityManager, consumerName: string, messageId: string, at: Date): Promise<void> {
         await em.nativeUpdate(InboxMessageRow, {consumerName, messageId}, {processedAt: at});
     }

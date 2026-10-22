@@ -44,6 +44,9 @@ If one run differs, run the failing file alone 20 times (`for i in $(seq 20); do
 | 15 | `test/experiments/contention.spec.ts` |
 | outbox: claim, publisher (rollback, crash, two publishers, retry, timer) | `test/integration/outboxClaim.spec.ts`, `test/integration/outbox.spec.ts` |
 | SQS test helpers | `test/integration/sqsSupport.spec.ts` |
+| consumer: ack, duplicates, crash after commit, DLQ, `FAILED`, redrive, shutdown, timer loop, `maxReceiveCount` | `test/integration/consumer.spec.ts` (about 35 s: it waits out the 2 s visibility timeout) |
+| `recordFailure`, `reprocess`, `findDuePendingReference` | `test/integration/recordFailureReprocess.spec.ts` |
+| pending-reference worker: out of order, D3 timeline, concurrent ticks | `test/integration/pendingReference.spec.ts` |
 | readiness reads the queue | `test/e2e/health.e2e-spec.ts` |
 
 Current state (2026-10-21): 392 unit, 190 integration and e2e, three green runs in a row.

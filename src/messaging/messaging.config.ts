@@ -6,6 +6,8 @@ export interface MessagingConfig {
     eventsQueueUrl: string;
     workersEnabled: boolean;
     outboxPollMs: number;
+    pendingPollMs: number;
+    wagerMaxReceiveCount: number;   // must equal the queue's maxReceiveCount (localstack init script)
 }
 
 const required = (name: string): string => {
@@ -21,5 +23,7 @@ export function messagingConfig(): MessagingConfig {
         eventsQueueUrl: required('EVENTS_QUEUE_URL'),
         workersEnabled: process.env.WORKERS_ENABLED !== 'false',
         outboxPollMs: Number(process.env.OUTBOX_POLL_MS ?? 1000),
+        pendingPollMs: Number(process.env.PENDING_POLL_MS ?? 5000),
+        wagerMaxReceiveCount: Number(process.env.WAGER_MAX_RECEIVE_COUNT ?? 5),
     };
 }

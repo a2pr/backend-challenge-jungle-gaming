@@ -4,7 +4,7 @@ import {MikroORM} from '@mikro-orm/postgresql';
 import {createOrm, resetSchema, truncateAll} from '../support/db.js';
 import {assertLedgerMatchesBalance} from '../support/ledger.js';
 import {betCommand, brl, completed, openWallet, runInParallel} from '../support/fixtures.js';
-import {SubmitWagerCommand, SubmitWagerTransactionUseCase} from '../../src/wager/SubmitWagerTransaction.usecase.js';
+import {SubmitWagerTransactionUseCase} from '../../src/wager/SubmitWagerTransaction.usecase.js';
 import {WalletRepository} from '../../src/wallet/wallet.repository.js';
 import {WagerTransactionRepository} from '../../src/wager/wagerTransaction.repository.js';
 import {WalletLedgerRepository} from '../../src/wallet/walletLedger.repository.js';

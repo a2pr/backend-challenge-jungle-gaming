@@ -32,7 +32,7 @@ const submitWith = (outbox = new OutboxRepository()) =>
         new WalletLedgerRepository(), outbox, new InboxRepository());
 
 const config = (over: Partial<MessagingConfig> = {}): MessagingConfig => ({
-    ...queues, workersEnabled: false, outboxPollMs: 1000, ...over,
+    ...queues, workersEnabled: false, outboxPollMs: 1000, pendingPollMs: 5000, wagerMaxReceiveCount: 5, ...over,
 });
 const publisher = (over: Partial<MessagingConfig> = {}, outbox = new OutboxRepository(), client: SQSClient = sqs) =>
     new OutboxPublisher(orm, outbox, client, config(over));

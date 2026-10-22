@@ -10,6 +10,7 @@ import {WagerTransactionRepository} from "./wagerTransaction.repository.js";
 import {WalletLedgerRepository} from "../wallet/walletLedger.repository.js";
 import {OutboxRepository} from "../messaging/outbox.repository.js";
 import {InboxRepository} from "../messaging/inbox.repository.js";
+import {InboxPayloadMismatchError} from "../messaging/errors.js";
 import {EntityManager, UniqueConstraintViolationException} from "@mikro-orm/core";
 import WagerTransaction from "./wagerTransaction.js";
 import Wallet from "../wallet/wallet.js";
@@ -116,7 +117,11 @@ export class SubmitWagerTransactionUseCase {
     private async run(tx: EntityManager, input: RunInput): Promise<SubmitWagerOutcome> {
         const inbox = input.inbox
         if (inbox && !(await this.inboxRepo.tryInsert(tx, {...inbox, receivedAt: input.now}))) {
-            return {kind: 'duplicate-message'}        // already committed by an earlier delivery: the consumer acks it
+            // same id, other content: the provider reused an id (permanent). Same content: an earlier delivery committed, the consumer acks it.
+            if (!(await this.inboxRepo.hasPayload(tx, inbox.consumerName, inbox.messageId, inbox.payloadHash))) {
+                throw new InboxPayloadMismatchError(inbox.consumerName, inbox.messageId)
+            }
+            return {kind: 'duplicate-message'}
         }
         const result = await this.process(tx, input)
         if (inbox) await this.inboxRepo.markProcessed(tx, inbox.consumerName, inbox.messageId, input.now)

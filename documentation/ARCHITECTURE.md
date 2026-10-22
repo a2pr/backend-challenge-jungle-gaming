@@ -198,3 +198,41 @@ The guarantees live in the schema, not only in the code: `CHECK (balance >= 0)`,
 **Known limit: one tick at a time per process.** The timer skips a beat while the previous tick runs; across processes `SKIP LOCKED` does the separation. `tick` takes the clock as a parameter so tests do not sleep.
 
 **Readiness.** `/health/ready` calls `GetQueueAttributes` on `wager-transactions.fifo` through the shared `SQS_CLIENT`, so a missing queue turns it red. The events queue is not probed.
+
+## SQS consumer, inbox and pending-reference worker [10, 6.5, 7.1] (D3, D8, D18)
+
+The consumer (`WagerConsumer`) and the `PendingReferenceWorker` hold **no financial logic**: both call `SubmitWagerTransactionUseCase` (`execute`, `recordFailure`, `reprocess`), the same class HTTP uses. They are registered in `WalletModule`, next to the use case, because `MessagingModule` cannot import it back (circular).
+
+### Error classification (`classify`, `src/messaging/errorClassification.ts`)
+
+| Bucket | Errors | Consumer action |
+|---|---|---|
+| business | never an exception: the use case persists `REJECTED` and returns normally (also `duplicate-message`) | commit, then delete. Never the DLQ |
+| permanent | `ZodError`, `SyntaxError` (unparsable body), `InvalidMoneyError`, `CurrencyMismatchError`, `InvalidWagerTransactionError`, `InvalidMovementError`, `IdempotencyConflictError`, `DuplicateExternalTransactionError`, `WalletNotFoundError`, `InboxPayloadMismatchError` | DLQ send, then delete, on the first receive |
+| transient (default) | everything else: connection loss, deadlock `40P01`, serialization `40001`, lock timeout `55P03`, SQS errors, a bug (`InvalidTransactionStateError`) | leave the message; SQS redelivers after the visibility timeout. On the last receive: `recordFailure`, DLQ send, delete |
+
+Unknown means transient: a wrong "transient" only retries, a wrong "permanent" sends a good message to the DLQ. `InvalidWagerTransactionError` and `InvalidMovementError` are permanent too (they are the HTTP 400s), which the phase table did not list. The table is separate from `toHttp` on purpose: same classes, a different action.
+
+### Decisions
+
+| Decision | Choice | Rejected alternative and why | Consequence |
+|---|---|---|---|
+| Order of the last receive (D8) | `recordFailure`, then DLQ `SendMessage`, then `DeleteMessage`. Permanent: DLQ send, then delete | Delete first (a crash loses the message); DLQ send first without the audit row (no trace in the database) | A crash between send and delete leaves a duplicate in the DLQ (at-least-once). The DLQ dedup id is the SQS `MessageId`, stable across redeliveries, so a repeat inside 5 minutes is dropped by the broker |
+| `recordFailure` fails (database down) | Do not delete. SQS moves the message to the DLQ itself on the next receive after `maxReceiveCount` | Delete anyway (loses the message) | The only loss is the audit row. Covered by a test: DLQ has the message, no `wager_transactions` row |
+| `FAILED` replay caveat (D8) | A `FAILED` row is terminal and keeps its idempotency key, so a DLQ redrive replays `FAILED` and moves no money | Making `FAILED` retryable (a second effect path) | After a fault is fixed the provider must resubmit with a **new key** (and new external id). Both paths are tested |
+| Ack only after the commit | `execute` returns, then `DeleteMessage`. A failed delete is logged and the message comes back; the inbox answers `duplicate-message` | Delete inside the transaction (a crash loses it) | "Worker dies after commit, before delete" is covered with a failing `DeleteMessage` override: one debit |
+| Inbox hash check | `tryInsert` false then `hasPayload(consumer, messageId, hash)`; a different hash throws `InboxPayloadMismatchError` (permanent), the same hash is `duplicate-message`. Compared in SQL because `payload_hash` is `char(64)` | Treating every repeated id as a duplicate (silently drops a provider that reused an id for new content) | The hash is `payloadHash(command)`: it ignores the idempotency key |
+| Sequential batch | Up to 10 messages per `ReceiveMessage`, handled one after another | Parallel handling inside a batch (reorders a wallet's messages, more lock contention) | **Throughput ceiling:** one message at a time per instance. Scale by instances; FIFO groups (`walletId`) keep order across them |
+| A message that stays hands back the batch | If a message is not acked (retry, DLQ trouble, failed delete) or the app is stopping, the unstarted rest gets `ChangeMessageVisibility(0)` | Keep going through the batch (a later message of the same wallet would be applied ahead of the one that stays) | Per-wallet order survives a retry. Same path as shutdown |
+| `ApproximateReceiveCount` | Compared with `>=` `WAGER_MAX_RECEIVE_COUNT` (default 5) | `===` | The value **must equal** the queue's `maxReceiveCount` (`MAX_RECEIVE` in `queues.sh`); a test reads the real queue's `RedrivePolicy` and fails on a mismatch |
+| Graceful shutdown | `beforeApplicationShutdown`: set `stopping`, abort the long poll (`AbortController`), await the message in hand, then the loop. `app.enableShutdownHooks()` is already in `configureApp` | `onApplicationShutdown` (MikroORM may close the connection before the commit); aborting the message in hand (half work) | The message in hand commits and is deleted. `OutboxPublisher` still uses `onApplicationShutdown` and may have the same ordering risk (not investigated) |
+| Reprocess shares `decide` | `execute` and `reprocess` call one private `decide` (wallet check, reference, `apply`). A retry that is still pending queues **no new event**; the first attempt already queued `WagerTransactionPendingReference` | A copy of the money logic in `reprocess` (HTTP, queue and worker drift apart) | `reprocess(id, now)` takes the clock so tests assert the D3 timeline (+40 s, +80 s) without sleeping |
+| Lock order in the worker | `findDuePendingReference` returns ids only, in a short transaction; each `reprocess` then takes the wallet lock, re-reads the row under it and returns if it is no longer `PENDING_REFERENCE` | Holding row locks on transactions while locking wallets (inverted lock order) | Two workers may pick the same id; the second does nothing (one credit, tested) |
+
+**FIFO head-of-line blocking.** While a message of a group is in flight or being retried, later messages of the same `MessageGroupId` (`walletId`) wait behind it. A poison message therefore delays its wallet until it reaches the DLQ, which is why `maxReceiveCount` stays at 5 and the visibility timeout at 30 s: worst case a wallet is blocked for about 2 minutes. Producers use `walletId` as the group id and `messageId` as the deduplication id.
+
+**Known limits.**
+- The consumer's loop pauses 1 s after an unexpected error (so a dead database does not spin the CPU); shutdown can wait up to that long.
+- `recordFailure` can still fail with a unique violation if the same key races on another wallet; the consumer then leaves the message and SQS redrives it.
+- Exit on `SIGTERM` was checked with `docker compose stop` (0.5 s, exit 0 while the consumer was in its 20 s long poll). A `SIGTERM` in the middle of a message is covered by the `app.close()` test, not by a real signal.
+- Pending-reference retries do not queue an event per attempt; only the first and the final rejection are visible to subscribers.
