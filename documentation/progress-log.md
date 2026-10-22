@@ -191,7 +191,10 @@ State: `bun run test` 427 passed, `bun run test:e2e` 220 passed (three runs in a
 | 6 Consumer tests | done | `consumer.spec.ts`, 14 tests against real SQS: duplicate delivery, crash after commit, malformed, unknown wallet, hash mismatch, business rejection, five-receive DLQ with `FAILED` and redrive, database down for `recordFailure`, failing DLQ send, shutdown mid-message, timer loop, `maxReceiveCount` equals the redrive policy |
 | 7 Pending-reference tests | done | `pendingReference.spec.ts`, 5 tests: both out-of-order flows, D3 timeline to `REFERENCE_NOT_FOUND`, concurrent ticks, one failing row |
 
-Checked by hand on the compose stack: one message sent to the real `wager-transactions.fifo` was consumed by the running `nest-app` (wallet 100.00 to 90.00); `docker compose stop nest-app` exited in 0.5 s with code 0.
+Checked by hand:
+
+- Compose stack: one message sent to the real `wager-transactions.fifo` was consumed by the running `nest-app` (wallet 100.00 to 90.00). `docker compose stop nest-app` while idle (consumer in its long poll): 0.5 s, exit code 0.
+- Real `SIGTERM` mid-message: `node dist/main` on the host, three messages in one batch, the wallet row locked from a `psql` session so the first was stuck. The process waited for the commit (about 1.6 s), the first message was `PROCESSED` and deleted, the other two were visible again at once, DLQ empty. Exit code 143 is Nest re-raising the signal after the hooks, i.e. the graceful path. Procedure in `ARCHITECTURE.md`, "Known limits".
 
 Decisions: see "SQS consumer, inbox and pending-reference worker" in `ARCHITECTURE.md`.
 

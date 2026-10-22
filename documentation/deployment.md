@@ -54,6 +54,8 @@ docker compose down               # keep data
 docker compose down -v            # also wipe Postgres and LocalStack volumes
 ```
 
+**Stopping the app.** `docker compose stop nest-app` sends `SIGTERM`; the consumer finishes the message it is handling (it commits and is deleted), hands the unstarted ones back to the queue at once, and the process exits. Idle it takes under a second; mid-message it waits for the commit (at most the 5 s lock timeout). The exit code is 143: Nest re-raises the signal after shutting down, which is the normal graceful exit. Docker's default 10 s grace period is enough (do not set it below the 5 s lock timeout plus a commit) so `SIGKILL` never cuts a commit; a hard kill is still safe (the message is redelivered and the inbox dedupes it), only slower.
+
 **After changing dependencies**, recreate the anonymous `node_modules` volume or the container keeps the old one and fails with `Cannot find module`:
 
 ```bash
