@@ -16,6 +16,8 @@ export interface LogFields {
     httpStatus?: number;
     method?: string;
     path?: string;
+    instanceId?: string;
+    port?: number;
 }
 
 // One JSON object per event when the app runs with ConsoleLogger({ json: true }) (main.ts).

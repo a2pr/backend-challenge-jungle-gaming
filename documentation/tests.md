@@ -94,7 +94,7 @@ Every scenario ends with `waitForSettled` (`test/support/multi.ts`): stored coun
 **The tests can fail.** The HTTP race was checked by removing the wallet lock on a local branch (`lockMode: PESSIMISTIC_WRITE` in `wallet.repository.ts`): both HTTP tests failed (3 `PROCESSED` instead of 10, 503 for the same-key replays). The sabotage was reverted, never committed.
 
 **Limits.**
-- `INSTANCE_ID` is passed to each child but the application does not read it, so the tests cannot assert that every instance did a share of the work, only that the combined result is right. Adding the id to the startup log line would allow that.
+- The application logs `app.started` with its `INSTANCE_ID` (default: the hostname) and port, and every JSON line carries `pid`, so a failing test's output can be attributed to an instance. Log lines do not carry the instance id themselves, so the tests still cannot assert that every instance did a share of the work, only that the combined result is right.
 - The kill and the `SIGTERM` land "after 30 rows", not at a chosen line of code. Messages in flight at that moment make it a real redelivery test, but which message the victim held is not controlled. The assertions hold for any timing.
 - Same machine, same Postgres: this shows correctness across processes, not across hosts or network partitions.
 

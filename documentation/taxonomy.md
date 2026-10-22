@@ -90,14 +90,14 @@ Inbound message (`src/messaging/messageSchema.ts`): `{messageId, type: "WagerTra
 
 ## Log events (`src/observability/logEvent.ts`)
 
-JSON lines, event name under `message.event`. Fields allowed: `correlationId`, `messageId`, `transactionId`, `walletId`, `providerId`, `status`, `failureCode`, `source`, `errorType`, `httpStatus`, `method`, `path`.
+JSON lines, event name under `message.event`. Fields allowed: `correlationId`, `messageId`, `transactionId`, `walletId`, `providerId`, `status`, `failureCode`, `source`, `errorType`, `httpStatus`, `method`, `path`, `instanceId`, `port`.
 
 | Group | Events |
 |---|---|
 | use case | `wager.processed`, `wager.rejected`, `wager.pending_reference`, `wager.failed`, `wager.replay`, `wager.duplicate_message`, `wager.pending_reference_retry` |
 | consumer | `consumer.retry`, `consumer.permanent_failure`, `consumer.dead_lettered`, `consumer.poll_failed`, `consumer.record_failure_failed`, `consumer.dlq_send_failed`, `consumer.delete_failed`, `consumer.release_failed` |
 | workers | `outbox.publish_failed`, `outbox.tick_failed`, `pending_reference.reprocess_failed`, `pending_reference.tick_failed` |
-| other | `http.error`, `reconciliation.mismatch` |
+| other | `app.started` (instance id and port, once), `http.error`, `reconciliation.mismatch` |
 
 ## Database tables (`src/migrations/`)
 

@@ -26,7 +26,7 @@ Compose reads `.env` in the project root; `.env.example` is the template (`cp .e
 | `WAGER_MAX_RECEIVE_COUNT` | 5 | must equal the queue's `maxReceiveCount` (`localstack/init/ready.d/queues.sh`); a test checks it |
 | `AWS_ENDPOINT_URL_SQS`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | none | read by the AWS SDK. LocalStack takes any credentials (`test`/`test` in Compose); drop the endpoint to use real SQS |
 | `TESTING_MULTIPLE_INSTANCES` | 3 | instance count of `test:multi` |
-| `INSTANCE_ID` | none | set by `test:multi` on each child; the app does not read it yet |
+| `INSTANCE_ID` | none | name of the instance in the `app.started` log line; set by `test:multi` on each child. Default: the hostname (the container id in Compose) |
 | `LOCALSTACK_DOCKER_NAME` | `localstack-main` | LocalStack container name |
 | `TESTING_WITH_FAILURES`, `LOCALSTACK_VOLUME_DIR` | unused | left in `.env.example`; failure injection is done by `overrideProvider` in the tests |
 

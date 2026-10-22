@@ -229,7 +229,7 @@ Checked by hand: three containers (`docker compose run ... node dist/main.js` on
 Decisions: see "Multi-instance correctness" in `ARCHITECTURE.md`.
 
 Open items:
-- `INSTANCE_ID` is passed to the children but not read by the app; tests cannot assert that every instance did a share of the work.
+- `INSTANCE_ID` was not read by the app when this phase closed; since then the startup log line carries it (see "Instance id" below). Tests still cannot assert that every instance did a share of the work.
 - Kill and `SIGTERM` timing is by database state, not by code line; which message the victim held is not controlled.
 - Single machine, single Postgres.
 
@@ -257,7 +257,7 @@ Differences from the phase document:
 Decisions: see "Observability" in `ARCHITECTURE.md`.
 
 Open items:
-- No `instance` label; `INSTANCE_ID` is unused.
+- No `instance` metric label (the scraper adds one); `INSTANCE_ID` is only in the startup log line.
 - Consumer received/acked counts and the 5xx stack in JSON mode were not checked beyond the unit test.
 
 ## Phase 10: documentation (done 2026-10-22)
@@ -280,6 +280,10 @@ Guesses found and fixed:
 Also changed in this phase: `OutboxPublisher` now stops in `beforeApplicationShutdown` like the other workers (it used `onApplicationShutdown`, which could race the ORM close); the two shutdown tests call the new name.
 
 Not run: the dry run was on the same machine and the same Docker daemon, so it does not prove a different OS or an empty Docker image cache. `errorType` in logs is the error class name, which the pg driver reports as just `error` for database errors; the message is left out on purpose (it can quote values).
+
+## Instance id (2026-10-22)
+
+`main.ts` logs `{"event":"app.started","instanceId":...,"port":...}` once, after `listen`. `instanceId` is `INSTANCE_ID` or the hostname. Every JSON line already has `pid`, so the startup line is the key that attributes the rest. `LogFields` gained `instanceId` and `port`; `multi/smoke.spec.ts` asserts each child logs its own id. Not done: the id on every line, or as a metric label.
 
 ## Known issues and risks
 

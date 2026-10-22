@@ -273,7 +273,7 @@ The timers' "skip the beat while the previous tick runs" only avoids overlap ins
 - Postgres failover and SQS regional failure: out of scope for the challenge (README §2).
 - Hot wallet throughput does not scale with instances: the row lock serialises one wallet whatever the instance count (contention experiment, D1). More instances help many wallets, not one.
 - Connection budget: `DATABASE_POOL_MAX` times the instance count must stay under Postgres `max_connections` (the multi tests use 10 per instance).
-- `INSTANCE_ID` is not read by the application, so logs cannot yet say which instance handled what.
+- `INSTANCE_ID` appears only in the `app.started` line (with the port); the `pid` on every line ties the rest to it. The id is not repeated on each line.
 
 ## Observability [12] (D14)
 
@@ -303,7 +303,7 @@ The timers' "skip the beat while the previous tick runs" only avoids overlap ins
 | `MetricsService` as a trailing defaulted constructor argument | `= new MetricsService()` in the use case and publisher | Making it required | Code that builds them by hand keeps working; Nest still injects the shared instance |
 | `IdempotencyConflictError` | Not counted in `wager_duplicates_total` | Counting it | It is a conflicting payload, not a duplicate; it shows as a 409 in the HTTP status logs |
 
-**Not done.** No per-instance label (`INSTANCE_ID` is not read), so a multi-instance scrape needs the scraper to add `instance`; no OpenTelemetry or dashboard (optional in the README); no metric for the consumer's received/acked counts or FIFO group blocking; the ledger-page and read endpoints are not timed.
+**Not done.** No per-instance metric label (`INSTANCE_ID` is only in the startup log line), so a multi-instance scrape needs the scraper to add `instance`; no OpenTelemetry or dashboard (optional in the README); no metric for the consumer's received/acked counts or FIFO group blocking; the ledger-page and read endpoints are not timed.
 
 ## Concurrency walkthrough: the README §8 scenario
 
@@ -343,7 +343,7 @@ Stated as limitations, each with its ceiling and the way up.
 | The observed balance (`balance_after`) is persistence-only; the retry state adds two fields (`attempts`, `nextAttemptAt`) to the README `WagerTransaction` constructor | deviation from the skeleton | listed under "Deviations from the README skeletons" |
 | LocalStack pinned to 4.4 (newer tags need an auth token), Postgres 13 near end of life | no security patches | real SQS and a supported Postgres major |
 | Tests ran on one machine against one Postgres | shows correctness across processes, not across hosts or partitions | repeat `test:multi` against a staging cluster |
-| `INSTANCE_ID` is not read; metrics have no instance label | logs cannot say which instance did what | read it in `main.ts`, add it to the log and as a scrape label |
+| The instance id is only in the `app.started` log line; metrics have no instance label | attributing a line needs the `pid` join | add the id to every line and as a scrape label |
 
 ## Considered, not implemented
 
